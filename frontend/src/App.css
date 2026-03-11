@@ -1,0 +1,5 @@
+body { font-family: Arial, sans-serif; }
+.App { max-width: 700px; margin: 0 auto; padding: 2em; }
+.feed, .map { margin-bottom: 2em; }
+.feed ul, .map ul { list-style: none; padding: 0; }
+.feed li, .map li { margin-bottom: 0.5em; }
