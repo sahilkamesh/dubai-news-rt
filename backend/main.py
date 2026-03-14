@@ -16,6 +16,7 @@ TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 import requests
 import json
 import re
+import threading
 from difflib import SequenceMatcher
 from math import exp
 from collections import Counter
@@ -25,7 +26,7 @@ from collections import Counter
 # Find recent megathread links using Reddit's .json API
 def get_recent_megathread_links(subreddit="dubai", thread_title="Attacks Megathread", count=3):
     headers = {"User-Agent": "Mozilla/5.0 (compatible; uae-news-app/0.1)"}
-    url = f"https://www.reddit.com/r/{subreddit}/new.json?limit=30"
+    url = f"https://www.reddit.com/r/{subreddit}/new.json?limit=90"
     resp = requests.get(url, headers=headers)
     posts = resp.json().get("data", {}).get("children", [])
     links = []
@@ -36,6 +37,69 @@ def get_recent_megathread_links(subreddit="dubai", thread_title="Attacks Megathr
         if len(links) >= count:
             break
     return links
+
+def collect_reddit_raw_comments_last_24h(start_json_url: str, hours: int = 24, max_threads: int = 16) -> List[dict]:
+    cutoff = time.time() - hours * 3600
+
+    raw: List[dict] = []
+    seen_comment_ids = set()
+    thread_url = start_json_url
+
+    for _ in range(max_threads):
+        if not thread_url:
+            break
+
+        thread_json = _fetch_reddit_thread_json(thread_url, sort="new", limit=500)
+        if not thread_json:
+            break
+
+        children = thread_json[1].get("data", {}).get("children", [])
+        oldest_seen_in_thread = None
+
+        for c in children:
+            if c.get("kind") != "t1":
+                continue
+            cdata = c.get("data", {})
+            cid = cdata.get("id")
+            if not cid or cid in seen_comment_ids:
+                continue
+            seen_comment_ids.add(cid)
+
+            created = float(cdata.get("created_utc", 0.0) or 0.0)
+            if oldest_seen_in_thread is None or created < oldest_seen_in_thread:
+                oldest_seen_in_thread = created
+
+            if created < cutoff:
+                # since sort=new, once we hit older-than-cutoff we can keep scanning a bit,
+                # but it's fine to just continue and allow older ones to be skipped.
+                continue
+
+            body = cdata.get("body", "") or ""
+            timestamp = datetime.datetime.fromtimestamp(created, datetime.timezone.utc)
+            # Convert to GST
+            timestamp += datetime.timedelta(hours=4)
+            raw.append({
+                "id": cid,
+                "created_utc": created,
+                "timestamp": str(timestamp),
+                "source": "Reddit",
+                "category": "User Report",
+                "location": "Unknown",
+                "severity": 1,
+                "text": body,
+                "link": f"https://reddit.com{cdata.get('permalink', '')}",
+                "author": cdata.get("author") or "unknown",
+            })
+
+        # If the oldest comment we saw in this thread is still within cutoff,
+        # we might need to traverse to the previous megathread to reach further back.
+        if oldest_seen_in_thread is not None and oldest_seen_in_thread >= cutoff:
+            thread_url = _extract_previous_megathread_json_url(thread_json)
+            continue
+
+        break
+
+    return raw
 
 # --- Reddit thread traversal (24h window) ---
 def _fetch_reddit_thread_json(json_url: str, sort: str = "new", limit: int = 500) -> Optional[list]:
@@ -77,66 +141,6 @@ def _extract_previous_megathread_json_url(thread_json: list) -> Optional[str]:
             return url.rstrip("/") + "/.json"
 
     return candidates[0].rstrip("/") + "/.json" if candidates else None
-
-def _collect_reddit_raw_comments_last_24h(start_json_url: str, hours: int = 24, max_threads: int = 8) -> List[dict]:
-    cutoff = time.time() - hours * 3600
-
-    raw: List[dict] = []
-    seen_comment_ids = set()
-    thread_url = start_json_url
-
-    for _ in range(max_threads):
-        if not thread_url:
-            break
-
-        thread_json = _fetch_reddit_thread_json(thread_url, sort="new", limit=500)
-        if not thread_json:
-            break
-
-        children = thread_json[1].get("data", {}).get("children", [])
-        oldest_seen_in_thread = None
-
-        for c in children:
-            if c.get("kind") != "t1":
-                continue
-            cdata = c.get("data", {})
-            cid = cdata.get("id")
-            if not cid or cid in seen_comment_ids:
-                continue
-            seen_comment_ids.add(cid)
-
-            created = float(cdata.get("created_utc", 0.0) or 0.0)
-            if oldest_seen_in_thread is None or created < oldest_seen_in_thread:
-                oldest_seen_in_thread = created
-
-            if created < cutoff:
-                # since sort=new, once we hit older-than-cutoff we can keep scanning a bit,
-                # but it's fine to just continue and allow older ones to be skipped.
-                continue
-
-            body = cdata.get("body", "") or ""
-            raw.append({
-                "id": cid,
-                "created_utc": created,
-                "timestamp": str(datetime.datetime.utcfromtimestamp(created)),
-                "source": "Reddit",
-                "category": "User Report",
-                "location": "Unknown",
-                "severity": 1,
-                "text": body,
-                "link": f"https://reddit.com{cdata.get('permalink', '')}",
-                "author": cdata.get("author") or "unknown",
-            })
-
-        # If the oldest comment we saw in this thread is still within cutoff,
-        # we might need to traverse to the previous megathread to reach further back.
-        if oldest_seen_in_thread is not None and oldest_seen_in_thread >= cutoff:
-            thread_url = _extract_previous_megathread_json_url(thread_json)
-            continue
-
-        break
-
-    return raw
 
 # Fetch comments from a Reddit megathread .json endpoint
 _STOPWORDS = {
@@ -390,6 +394,7 @@ _KNOWN_AREAS = [
     "deira", "bur dubai", "jumeirah", "jumeirah beach", "satwa", "karama",
     "mirdif", "al quoz", "al qusais", "rashidiya", "nad al sheba", "international city",
     "silicon oasis", "motor city", "sports city", "dic", "dubai internet city", "media city",
+    "difc", "dubai international financial centre",
     "jafza", "jebel ali", "jebel ali village", "jaddaf", "al jaddaf",
     "al nahda", "al nahda 1", "al nahda 2",
     # Other emirates/areas commonly referenced
@@ -404,28 +409,124 @@ _CANONICAL_AREA = {
     "al jaddaf": "Al Jaddaf",
     "jaddaf": "Al Jaddaf",
     "dip": "Dubai Investment Park",
+    "ad": "Abu Dhabi",
+    "difc": "DIFC",
+    "dubai international financial centre": "DIFC",
 }
+
+_DISCOVERED_AREAS_PATH = Path(__file__).resolve().parent / "known_areas_additions.json"
+_DISCOVERED_LOCK = threading.Lock()
+_discovered_areas: List[str] = []  # lowercase keys we've seen and persisted
+_discovered_canonical: dict = {}   # lowercase -> display name
+
+def _load_discovered_areas() -> None:
+    global _discovered_areas, _discovered_canonical
+    try:
+        if not _DISCOVERED_AREAS_PATH.exists():
+            return
+        data = json.loads(_DISCOVERED_AREAS_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            _discovered_areas = [str(x).strip().lower() for x in data if x]
+        elif isinstance(data, dict):
+            _discovered_areas = [k.strip().lower() for k in data.keys() if k]
+            _discovered_canonical = {k.strip().lower(): str(v).strip() for k, v in data.items() if k}
+    except Exception:
+        pass
+
+def _save_discovered_area(lower_key: str, display_name: str) -> None:
+    global _discovered_areas, _discovered_canonical
+    with _DISCOVERED_LOCK:
+        if lower_key in _discovered_areas or lower_key in _discovered_canonical:
+            return
+        _discovered_areas.append(lower_key)
+        _discovered_canonical[lower_key] = display_name
+        try:
+            payload = {k: _discovered_canonical.get(k, k.title()) for k in _discovered_areas}
+            _DISCOVERED_AREAS_PATH.write_text(json.dumps(payload, indent=0), encoding="utf-8")
+        except Exception:
+            pass
+
+_load_discovered_areas()
+
+def _all_known_areas() -> List[str]:
+    """Known + discovered areas, longest first for matching."""
+    combined = list(_KNOWN_AREAS) + [a for a in _discovered_areas if a not in _KNOWN_AREAS]
+    return sorted(set(combined), key=len, reverse=True)
+
+def _canonical_for_area(lower_key: str, fallback_display: str) -> str:
+    if lower_key in _CANONICAL_AREA:
+        return _CANONICAL_AREA[lower_key]
+    if lower_key in _discovered_canonical:
+        return _discovered_canonical[lower_key]
+    return fallback_display
 
 def _extract_location_hint(text: str) -> Optional[str]:
     t = _normalize_text(text)
-
-    # 1) Direct known-area mentions (works for "JBR?" / "Barsha 1?" etc)
     tl = t.lower()
-    for area in sorted(_KNOWN_AREAS, key=len, reverse=True):
-        if re.search(rf"\b{re.escape(area)}\b", tl):
-            return _CANONICAL_AREA.get(area, area.title())
 
-    # e.g. "in barsha 1", "at Jadaf", "near Dubai Marina"
-    m = re.search(r"\b(in|at|near|around)\s+([A-Za-z][A-Za-z0-9\s\-/]{2,40})", t)
-    if not m:
-        return None
-    loc = m.group(2).strip()
-    # trim trailing punctuation
-    loc = re.sub(r"[.,;:!?]+$", "", loc).strip()
-    # avoid capturing generic phrases
-    if loc.lower() in {"dubai", "uae", "here", "there", "my area"}:
-        return None
-    return _CANONICAL_AREA.get(loc.lower(), loc)
+    # Terms that indicate a time window or vague reference, not a place.
+    _time_like_terms = {
+        "hour", "hours", "minute", "minutes", "second", "seconds",
+        "last", "today", "tonight", "yesterday", "now", "earlier",
+        "morning", "evening", "afternoon", "night",
+    }
+
+    # 1) Direct known-area or discovered-area mentions
+    for area in _all_known_areas():
+        tokens = area.split()
+        # Skip entries that are purely time-like phrases we accidentally learned,
+        # e.g. "last hour".
+        if tokens and all(tok in _time_like_terms for tok in tokens):
+            continue
+        if re.search(rf"\b{re.escape(area)}\b", tl):
+            return _canonical_for_area(area, area.title())
+
+    # 2) "in X", "at X", "near X", "around X", "from X" (X = short place name)
+    m = re.search(r"\b(in|at|near|around|from)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s\-/']{1,35})", t, re.I)
+    if m:
+        loc = re.sub(r"[.,;:!?]+$", "", m.group(2).strip()).strip()
+        tokens = loc.lower().split()
+        if (
+            loc
+            and 1 <= len(tokens) <= 4
+            and not (set(tokens) & _time_like_terms)
+            and loc.lower() not in {"dubai", "uae", "here", "there", "my area", "the"}
+        ):
+            key = loc.lower()
+            if key not in _all_known_areas() and key not in _discovered_areas:
+                _save_discovered_area(key, loc.title() if loc.isupper() or loc.islower() else loc)
+            return _canonical_for_area(key, loc)
+
+    # 3) "X area", "X side" (e.g. "Barsha 1 area", "JBR side")
+    m = re.search(r"\b([A-Za-z0-9][A-Za-z0-9\s\-/']{1,30})\s+(?:area|side)\b", t, re.I)
+    if m:
+        loc = m.group(1).strip()
+        if loc and len(loc.split()) <= 4 and loc.lower() not in {"dubai", "uae", "my", "that", "this"}:
+            key = loc.lower()
+            if key not in _all_known_areas() and key not in _discovered_areas:
+                _save_discovered_area(key, loc.title() if loc.isupper() or loc.islower() else loc)
+            return _canonical_for_area(key, loc)
+
+    # 4) "heard/saw/... in X" or "reported in X" (keep X short to avoid clauses)
+    m = re.search(r"\b(heard|saw|seen|reported|happened|occurred)\b.*?\b(?:in|at|near)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s\-/']{1,30})", t, re.I)
+    if m:
+        loc = re.sub(r"[.,;:!?]+$", "", m.group(2).strip()).strip()
+        # Reject long or sentence-like fragments (e.g. "alerts are getting much longer")
+        tokens = loc.lower().split()
+        if (
+            loc
+            and 1 <= len(tokens) <= 4
+            and not (set(tokens) & _time_like_terms)
+            and loc.lower() not in {"dubai", "uae", "here", "there"}
+        ):
+            skip = {"ad", "getting", "longer", "alerts", "much", "are", "the", "and", "or"}
+            if not set(loc.lower().split()) & skip:
+                key = loc.lower()
+                if key not in _all_known_areas() and key not in _discovered_areas:
+                    _save_discovered_area(key, loc.title() if loc.isupper() or loc.islower() else loc)
+                return _canonical_for_area(key, loc)
+
+    return None
 
 def _event_type_from_text(text: str) -> str:
     t = _normalize_text(text).lower()
@@ -464,7 +565,7 @@ def _summarize_cluster(cluster: List[dict]) -> str:
         return f"{event_type.capitalize()} reported near {loc}. ({count} report{'s' if count != 1 else ''})"
     return f"{event_type.capitalize()} reported. ({count} report{'s' if count != 1 else ''})"
 
-def fetch_reddit_comments_from_json(json_url, max_comments=10):
+def fetch_reddit_comments_from_json(json_url, max_comments=1000):
     headers = {"User-Agent": "Mozilla/5.0 (compatible; uae-news-app/0.1)"}
     resp = requests.get(json_url, headers=headers)
     if resp.status_code != 200:
@@ -529,19 +630,25 @@ def fetch_reddit_comments_from_json(json_url, max_comments=10):
         # Link to the "best" (most relevant) comment
         best = max(cluster, key=lambda c: (c.get("_relevance", 0.0), len(c.get("text", ""))))
 
-        # Prefer cluster location if present
+        # Prefer cluster location when any comment specifies an area
         loc = None
         for c in cluster:
             if c.get("_loc_hint"):
                 loc = c.get("_loc_hint")
                 break
+        if not loc:
+            loc = _extract_location_hint(best.get("text", "") or "")
+
+        # Require a concrete area/location for feed inclusion.
+        if not loc:
+            continue
 
         aggregated.append({
             "id": f"reddit_cluster_{best.get('id')}",
             "timestamp": ts,
             "source": "Reddit",
             "category": "User Report (Aggregated)",
-            "location": loc or "Unknown",
+            "location": loc,
             "severity": severity,
             "confidence": round(confidence, 3),
             "text": _summarize_cluster(cluster),
@@ -580,19 +687,25 @@ def _aggregate_reddit_raw_items(raw_items: List[dict], max_comments: int) -> Lis
         # Link to the "best" (most relevant) comment
         best = max(cluster, key=lambda c: (c.get("_relevance", 0.0), len(c.get("text", ""))))
 
-        # Prefer cluster location if present
+        # Prefer cluster location when any comment specifies an area
         loc = None
         for c in cluster:
             if c.get("_loc_hint"):
                 loc = c.get("_loc_hint")
                 break
+        if not loc:
+            loc = _extract_location_hint(best.get("text", "") or "")
+
+        # Require a concrete area/location for feed inclusion.
+        if not loc:
+            continue
 
         aggregated.append({
             "id": f"reddit_cluster_{best.get('id')}",
             "timestamp": ts,
             "source": "Reddit",
             "category": "User Report (Aggregated)",
-            "location": loc or "Unknown",
+            "location": loc,
             "severity": severity,
             "confidence": round(confidence, 3),
             "text": _summarize_cluster(cluster),
@@ -629,8 +742,66 @@ class AreaStatus(BaseModel):
     lastUpdated: str
     activeAlerts: List[str]
 
+
+def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
+    """
+    Aggregate per-area status from individual news items.
+    Only include items that have a concrete location (not 'Unknown').
+    """
+    by_area: dict = {}
+    for item in news_items:
+        loc = (item.get("location") or "").strip()
+        if not loc or loc.lower() == "unknown":
+            continue
+
+        # Parse timestamp for recency; fall back to 0 on failure.
+        ts_str = str(item.get("timestamp") or "")
+        try:
+            ts_val = datetime.datetime.fromisoformat(ts_str).timestamp()
+        except Exception:
+            ts_val = 0.0
+
+        sev = int(item.get("severity") or 1)
+
+        entry = by_area.get(loc)
+        if not entry:
+            by_area[loc] = {
+                "area": loc,
+                "severity": sev,
+                "last_ts": ts_val,
+                "lastUpdated": ts_str,
+                "activeAlerts": [str(item.get("text") or "").strip()] if item.get("text") else [],
+            }
+        else:
+            # Keep the max severity seen for this area.
+            if sev > entry["severity"]:
+                entry["severity"] = sev
+            # Track the most recent timestamp.
+            if ts_val > entry["last_ts"]:
+                entry["last_ts"] = ts_val
+                entry["lastUpdated"] = ts_str
+            # Optionally keep a small set of recent alert texts.
+            text = str(item.get("text") or "").strip()
+            if text and text not in entry["activeAlerts"]:
+                entry["activeAlerts"].append(text)
+
+    # Convert internal dicts to AreaStatus models
+    areas: List[AreaStatus] = []
+    for data in by_area.values():
+        # Limit active alerts to a few most recent/unique messages
+        alerts = data["activeAlerts"][:3]
+        areas.append(
+            AreaStatus(
+                area=data["area"],
+                severity=int(data["severity"]),
+                lastUpdated=data["lastUpdated"],
+                activeAlerts=alerts,
+            )
+        )
+    return areas
+
 _CACHE_TTL_SECONDS = 10 * 60
-_CACHE_VERSION = 3
+_CACHE_VERSION = 4
 _CACHE_PATH = Path(__file__).resolve().parent / "cache_news.json"
 _NEWS_CACHE: dict = {"ts": 0.0, "data": None}
 
@@ -736,13 +907,14 @@ def get_news():
         return [NewsItem(**comment) for comment in cached]
 
     # Collect and aggregate last 24 hours of reported events.
-    megathread_links = get_recent_megathread_links(count=1)
+    # megathread_links = get_recent_megathread_links(count=1)
+    megathread_links = get_recent_megathread_links()
     print(f"Found reddit megathread links: {megathread_links}")
 
     all_comments = []
     if megathread_links:
-        raw = _collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=8)
-        all_comments.extend(_aggregate_reddit_raw_items(raw, max_comments=60))
+        raw = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=8)
+        all_comments.extend(_aggregate_reddit_raw_items(raw, max_comments=10000))
     # Add X (Twitter) and official sources
     # all_comments.extend(fetch_x_twitter_reports())
     # all_comments.extend(fetch_uae_gov_alerts())
@@ -754,18 +926,9 @@ def get_news():
 
 @app.get("/areas", response_model=List[AreaStatus])
 def get_areas():
-    # Dummy data
-    return [
-        AreaStatus(
-            area="Dubai Marina",
-            severity=8,
-            lastUpdated=str(datetime.datetime.now()),
-            activeAlerts=["Missile sighting"]
-        ),
-        AreaStatus(
-            area="Downtown Dubai",
-            severity=2,
-            lastUpdated=str(datetime.datetime.now()),
-            activeAlerts=[]
-        )
-    ]
+    # Derive per-area status from the same news items that power the feed.
+    # This reuses caching logic inside get_news() so we don't refetch unnecessarily.
+    news = get_news()
+    # get_news() returns a List[NewsItem]; convert to plain dicts for aggregation.
+    raw_items = [n.dict() if isinstance(n, NewsItem) else n for n in news]
+    return _build_area_status_from_news(raw_items)

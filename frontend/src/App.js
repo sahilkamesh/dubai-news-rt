@@ -3,30 +3,41 @@ import './App.css';
 import { MapContainer, TileLayer, Polygon, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Dummy UAE area polygons (replace with real geojson for production)
-const AREAS = [
-  {
-    name: 'Dubai Marina',
-    coords: [
-      [25.0805, 55.1357], [25.0805, 55.1457], [25.0905, 55.1457], [25.0905, 55.1357]
-    ]
-  },
-  {
-    name: 'Downtown Dubai',
-    coords: [
-      [25.1972, 55.2744], [25.1972, 55.2844], [25.2072, 55.2844], [25.2072, 55.2744]
-    ]
-  }
-];
+// Simple approximate polygons per known area.
+// In a real app, replace this with proper GeoJSON.
+const AREA_GEOMETRIES = {
+  'Dubai Marina': [
+    [25.0805, 55.1357], [25.0805, 55.1457], [25.0905, 55.1457], [25.0905, 55.1357]
+  ],
+  'Downtown Dubai': [
+    [25.1972, 55.2744], [25.1972, 55.2844], [25.2072, 55.2844], [25.2072, 55.2744]
+  ],
+  // Rough boxes for a few additional common areas.
+  Satwa: [
+    [25.229, 55.280], [25.229, 55.300], [25.243, 55.300], [25.243, 55.280]
+  ],
+  Karama: [
+    [25.240, 55.295], [25.240, 55.320], [25.255, 55.320], [25.255, 55.295]
+  ],
+  Sharjah: [
+    [25.320, 55.360], [25.320, 55.430], [25.410, 55.430], [25.410, 55.360]
+  ],
+  Ajman: [
+    [25.380, 55.430], [25.380, 55.500], [25.470, 55.500], [25.470, 55.430]
+  ],
+  DIFC: [
+    [25.211, 55.273], [25.211, 55.292], [25.233, 55.292], [25.233, 55.273]
+  ]
+};
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
 function severityToColor(sev) {
-  // 1 => green, 10 => red (HSL 120 -> 0)
+  // 1 => yellow, 10 => red (HSL 60 -> 0)
   const s = clamp(Number(sev) || 1, 1, 10);
-  const hue = 120 - ((s - 1) / 9) * 120;
+  const hue = 60 - ((s - 1) / 9) * 60;
   return `hsl(${hue}, 85%, 45%)`;
 };
 
@@ -42,6 +53,10 @@ function App() {
       .then(res => res.json())
       .then(setAreas);
   }, []);
+
+  const sortedNews = [...news].sort(
+    (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+  );
 
   // Map area name to safety info
   const areaStatus = Object.fromEntries(areas.map(a => [a.area, a]));
@@ -60,10 +75,72 @@ function App() {
         </div>
       </div>
       <div className="main-content">
+        <div className="map">
+          <h2>UAE Incident Map</h2>
+          <MapContainer center={[25.2048, 55.2708]} zoom={10} style={{height: '400px', width: '100%'}}>
+            <TileLayer
+              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+              attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+            />
+            {areas.map(area => {
+              const geom = AREA_GEOMETRIES[area.area];
+              if (!geom) {
+                return null;
+              }
+              const sev = clamp(Number(area.severity) || 1, 1, 10);
+              const color = severityToColor(sev);
+
+              // Fade older alerts by lowering fill opacity.
+              let opacity = 0.2;
+              if (area.lastUpdated) {
+                const last = new Date(area.lastUpdated);
+                const ageMinutes = (Date.now() - last.getTime()) / 60000;
+                if (ageMinutes <= 10) {
+                  opacity = 0.7;
+                } else if (ageMinutes <= 60) {
+                  opacity = 0.45;
+                } else if (ageMinutes <= 180) {
+                  opacity = 0.3;
+                } else {
+                  opacity = 0.2;
+                }
+              }
+
+              return (
+                <Polygon
+                  key={area.area}
+                  positions={geom}
+                  pathOptions={{ color, fillColor: color, fillOpacity: opacity }}
+                >
+                  <Tooltip>
+                    <b>{area.area}</b><br/>
+                    Severity: {sev}/10<br/>
+                    {area.lastUpdated && (
+                      <>
+                        Last update: {new Date(area.lastUpdated).toLocaleTimeString()}<br/>
+                      </>
+                    )}
+                    {area.activeAlerts && area.activeAlerts.length > 0 && (
+                      <span>Alerts: {area.activeAlerts.join(', ')}</span>
+                    )}
+                  </Tooltip>
+                </Polygon>
+              );
+            })}
+          </MapContainer>
+        </div>
         <div className="feed">
           <h2>Live News Feed</h2>
           <div className="news-list">
-            {news.map(item => (
+            {sortedNews.map(item => {
+              const dt = new Date(item.timestamp);
+              const dateStr = dt.toLocaleDateString(undefined, {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+              });
+              const timeStr = dt.toLocaleTimeString();
+              return (
               <div
                 className="news-card"
                 key={item.id}
@@ -74,42 +151,15 @@ function App() {
                   <span className="news-source">{item.source}</span>
                   <span className="news-location">{item.location}</span>
                   <span className="news-location">Severity: {clamp(Number(item.severity) || 1, 1, 10)}/10</span>
-                  <span className="news-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
+                  <span className="news-time">
+                    {dateStr} {timeStr}
+                  </span>
                 </div>
                 <div className="news-body">{item.text}</div>
                 <a href={item.link} target="_blank" rel="noopener noreferrer">Source</a>
               </div>
-            ))}
+            );})}
           </div>
-        </div>
-        <div className="map">
-          <h2>UAE Severity Map</h2>
-          <MapContainer center={[25.2048, 55.2708]} zoom={10} style={{height: '400px', width: '100%'}}>
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap contributors"
-            />
-            {AREAS.map(area => {
-              const status = areaStatus[area.name] || { severity: 1, activeAlerts: [] };
-              const sev = clamp(Number(status.severity) || 1, 1, 10);
-              const color = severityToColor(sev);
-              return (
-                <Polygon
-                  key={area.name}
-                  positions={area.coords}
-                  pathOptions={{ color, fillColor: color, fillOpacity: 0.45 }}
-                >
-                  <Tooltip>
-                    <b>{area.name}</b><br/>
-                    Severity: {sev}/10<br/>
-                    {status.activeAlerts.length > 0 && (
-                      <span>Alerts: {status.activeAlerts.join(', ')}</span>
-                    )}
-                  </Tooltip>
-                </Polygon>
-              );
-            })}
-          </MapContainer>
         </div>
       </div>
     </div>

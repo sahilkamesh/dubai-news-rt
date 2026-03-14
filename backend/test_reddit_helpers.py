@@ -1,4 +1,8 @@
-from main import get_recent_megathread_links, fetch_reddit_comments_from_json
+from main import get_recent_megathread_links, collect_reddit_raw_comments_last_24h
+import json
+from pathlib import Path
+
+_TEST_OUTPUT = Path(__file__).resolve().parent / "test_comments.json"
 
 def test_get_recent_megathread_links():
     links = get_recent_megathread_links()
@@ -13,12 +17,13 @@ def test_fetch_reddit_comments_from_json():
     if not links:
         print('No megathread links to test comments.')
         return
-    comments = fetch_reddit_comments_from_json(links[0], max_comments=5)
-    print('Comments:', comments)
+    comments = collect_reddit_raw_comments_last_24h(links[0])
+    # print('Comments:', comments)
     assert isinstance(comments, list)
     assert len(comments) > 0, 'No comments found for megathread.'
     assert 'text' in comments[0]
     print('test_fetch_reddit_comments_from_json passed')
+    _TEST_OUTPUT.write_text(json.dumps(comments), encoding="utf-8")
 
 if __name__ == '__main__':
     test_get_recent_megathread_links()
