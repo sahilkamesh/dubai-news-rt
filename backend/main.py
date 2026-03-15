@@ -85,9 +85,8 @@ def collect_reddit_raw_comments_last_24h(start_json_url: str, hours: int = 24, m
                 continue
 
             body = cdata.get("body", "") or ""
-            timestamp = datetime.datetime.fromtimestamp(created, datetime.timezone.utc)
-            # Convert to GST
-            timestamp += datetime.timedelta(hours=4)
+            gst = datetime.timezone(datetime.timedelta(hours=4))
+            timestamp = datetime.datetime.fromtimestamp(created, gst)
             raw.append({
                 "id": cid,
                 "timestamp": str(timestamp),
@@ -181,10 +180,10 @@ def aggregate_reddit_comments_gemini(raw_comments : List[dict]) -> List[dict]:
     # Compose the prompt for Gemini
     prompt = f"""
         Analyze user reports from r/dubai. Only consider comments with real reports of incidents seen or heard,
-        and with a location. Ensure to ignore off-topic or irrelevant items or questions. Identify specific 
+        and with a location. Ensure to ignore off-topic or irrelevant reports or questions. Identify specific 
         areas affected by incidents, and the types of incidents (ex interception seen, interception heard, Missile seen, loud noise etc.)
         Please group related incidents (similar area and time) into distinct event reports, each with a summary,
-        a confidence score, a severity score from 1-10, a location, and the earliest time the indicent was reported.
+        a confidence score, a safety concern severity score from 1-10, a location, and the earliest time the indicent was reported.
         For each cluster, respond as a JSON object with fields: summary, severity score, timestamp, location, and link to earliest comment.
         Format the output as a JSON list like:
         [
@@ -214,252 +213,6 @@ def aggregate_reddit_comments_gemini(raw_comments : List[dict]) -> List[dict]:
         generation_config={"response_mime_type": "application/json"}
     )
     return json.loads(response.text)
-
-
-# Fetch comments from a Reddit megathread .json endpoint
-_STOPWORDS = {
-    "a", "an", "the", "and", "or", "but", "if", "then", "else", "so", "to", "of", "in", "on", "at", "for", "with",
-    "as", "by", "is", "are", "was", "were", "be", "been", "being", "it", "its", "this", "that", "these", "those",
-    "i", "im", "i'm", "me", "my", "we", "our", "you", "your", "they", "them", "their", "he", "she", "his", "her",
-    "from", "into", "out", "up", "down", "over", "under", "again", "just", "really", "very", "not", "no", "yes",
-    "here", "there", "now", "then", "today", "tonight", "yesterday", "tomorrow",
-}
-
-_RELEVANT_KEYWORDS = {
-    # Interceptions / air-defense / projectiles
-    "intercept", "intercepted", "interception", "airdefense", "air-defense", "iron", "dome", "patriot",
-    "missile", "missiles", "rocket", "rockets", "drone", "drones", "uav", "shahed",
-    # Impacts / debris / explosions / sounds
-    "debris", "shrapnel", "fragment", "fragments", "wreckage", "impact", "hit", "explosion", "explosions",
-    "boom", "booms", "blast", "blasts", "bang", "banging", "sirens", "siren", "alarm", "alarms",
-    # Visual indicators (keep specific nouns; avoid generic verbs like "seen")
-    "streak", "streaks", "trail", "trails", "smoke", "smoky", "fireball", "flash", "tracer", "flare",
-    # Hearing / reports
-    "heard", "hearing", "sound", "sounds",
-    "incoming", "overhead",
-}
-
-_NEGATIVE_HINTS = {
-    # Common irrelevant megathread content types
-    "mods", "moderator", "stickied", "sticky", "rules", "rule", "ban", "banned",
-    "politics", "propaganda", "source?", "link?", "rumor", "rumour",
-}
-
-_OPINION_OR_META_HINTS = {
-    # Opinions / takes / discussion (not event reports)
-    "i think", "i feel", "in my opinion", "imo", "imho", "likely", "probably", "prediction", "predict",
-    "outcome", "ceasefire", "war", "conflict", "geopolitics", "propaganda",
-    # Travel / advice / questions that are usually not reporting an event
-    "is it safe", "should i", "can i", "any update", "any news", "what should",
-    # Thread/meta
-    "megathread", "part", "thread",
-    # Unrelated but common in these threads
-    "gps spoof", "spoofing",
-}
-
-_EVENT_REPORT_PATTERNS = [
-    # First-person / direct observations
-    r"\b(i|we)\s+(heard|hear|saw|see|seen|spotted|noticed|felt)\b",
-    r"\b(heard|hearing)\b.*\b(boom|bang|blast|explosion|sirens?|alarm|noise|sound)\b",
-    r"\b(saw|seen|spotted)\b.*\b(missile|rocket|drone|uav|streak|trail|smoke|flash|fireball)\b",
-    # General event indicators (even without "I")
-    r"\bintercept(ed|ion)?\b",
-    r"\b(missile|rocket|drone|uav)\b.*\b(overhead|incoming|flying)\b",
-    r"\bdebris\b|\bshrapnel\b|\bimpact\b|\bwreckage\b",
-    r"\b(siren|alarm)s?\b",
-    r"\b(boom|bang|blast|explosion)s?\b",
-]
-
-def _normalize_text(text: str) -> str:
-    if not text:
-        return ""
-    text = re.sub(r"https?://\S+", " ", text)
-    text = re.sub(r"[\r\n\t]+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-def _tokenize(text: str) -> List[str]:
-    text = _normalize_text(text).lower()
-    # keep words and hyphenated words
-    tokens = re.findall(r"[a-z0-9]+(?:-[a-z0-9]+)?", text)
-    return [t for t in tokens if t not in _STOPWORDS and len(t) >= 2]
-
-def _relevance_score(text: str) -> float:
-    tokens = _tokenize(text)
-    if not tokens:
-        return 0.0
-    c = Counter(tokens)
-    score = 0.0
-    for kw in _RELEVANT_KEYWORDS:
-        if kw in c:
-            score += 2.0
-    for hint in _NEGATIVE_HINTS:
-        if hint in text.lower():
-            score -= 1.5
-    # Encourage first-person sensory reports
-    if re.search(r"\b(i|we)\s+(heard|hear|saw|see|seen|felt)\b", text.lower()):
-        score += 1.5
-    if re.search(r"\banyone\s+else\b", text.lower()):
-        score += 0.5
-    # Penalize question-style / opinion-style content
-    if "?" in text:
-        score -= 1.0
-    tl = text.lower()
-    for hint in _OPINION_OR_META_HINTS:
-        if hint in tl:
-            score -= 2.5
-    return score
-
-def _is_event_report(text: str) -> bool:
-    """
-    Keep only reported events (interceptions/attacks/debris/sounds),
-    not opinions, predictions, or general Q&A.
-    """
-    t = _normalize_text(text).lower()
-
-    if not t:
-        return False
-
-    # Hard drop: mostly questions/advice seeking
-    if t.count("?") >= 2:
-        return False
-    if re.search(r"\b(is it safe|should i|can i|any update|any news)\b", t):
-        return False
-
-    # Must look like an event report
-    if any(re.search(p, t) for p in _EVENT_REPORT_PATTERNS):
-        return True
-
-    # If it contains multiple strong keywords, allow it even without explicit "I"
-    tokens = set(_tokenize(t))
-    strong = {"intercept", "intercepted", "interception", "missile", "rocket", "drone", "uav", "explosion", "debris", "sirens", "siren"}
-    if len(tokens & strong) >= 2:
-        return True
-
-    return False
-
-def _classify_severity(text: str) -> int:
-    t = _normalize_text(text).lower()
-
-    # High: seeing missiles/drones or interception visuals
-    high_patterns = [
-        r"\b(saw|seen|spotted)\b.*\b(missile|rocket|drone|uav)\b",
-        r"\b(missile|rocket|drone|uav)\b.*\b(overhead|above|flying|incoming)\b",
-        r"\bintercept(ed|ion)?\b",
-        r"\bfireball\b|\btracer\b|\bstreak(s)?\b|\btrail(s)?\b",
-    ]
-    if any(re.search(p, t) for p in high_patterns):
-        return 9
-
-    # Debris/impact reports are generally serious even without "loud"
-    if re.search(r"\b(debris|shrapnel|wreckage|impact|fragment)s?\b", t):
-        return 7
-
-    # Medium: loud nearby interceptions/explosions
-    medium_patterns = [
-        r"\b(loud|huge|massive)\b.*\b(boom|bang|blast|explosion)\b",
-        r"\b(boom|bang|blast|explosion)\b.*\b(close|near|nearby|overhead)\b",
-        r"\b(siren|alarm)s?\b",
-    ]
-    if any(re.search(p, t) for p in medium_patterns):
-        return 6
-
-    # Low: distant sounds/rumbling
-    low_patterns = [
-        r"\b(distant|far|faint)\b.*\b(boom|bang|explosion|rumble)\b",
-        r"\bheard\b.*\b(distant|far|faint)\b",
-        r"\brumbling\b",
-        r"\bwhat\s+is\s+that\s+sound\b",
-        r"\bheard\b.*\b(sound|noise)\b",
-        r"\b(drone|uav)\b.*\b(sound|noise|buzz)\b",
-    ]
-    if any(re.search(p, t) for p in low_patterns):
-        return 3
-
-    # Generic boom/explosion mention (no distance qualifiers)
-    if re.search(r"\b(boom|bang|blast|explosion)s?\b", t):
-        return 5
-
-    return 1
-
-def _clamp_severity_1_10(sev: int) -> int:
-    try:
-        sev = int(sev)
-    except Exception:
-        return 1
-    return max(1, min(10, sev))
-
-def _normalize_location_key(loc: str) -> str:
-    loc = _normalize_text(loc).lower()
-    loc = re.sub(r"[^a-z0-9\s/-]", "", loc)
-    loc = re.sub(r"\s+", " ", loc).strip()
-    # normalize common patterns
-    loc = loc.replace("dubai ", "")
-    return loc
-
-def _jaccard(a: set, b: set) -> float:
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    union = len(a | b)
-    return inter / union if union else 0.0
-
-def _cluster_comments(items: List[dict], similarity_threshold: float = 0.32) -> List[List[dict]]:
-    """
-    Simple greedy clustering by token-set Jaccard similarity, with a fallback
-    to SequenceMatcher for very short texts.
-    """
-    clusters: List[List[dict]] = []
-    centroids: List[set] = []
-
-    for item in items:
-        text = item.get("text", "") or ""
-        tokens = set(_tokenize(text))
-
-        loc_hint = _extract_location_hint(text)
-        loc_key = _normalize_location_key(loc_hint) if loc_hint else ""
-        item["_loc_hint"] = loc_hint
-        item["_loc_key"] = loc_key
-
-        # Include location tokens to bias clustering toward similar areas
-        if loc_key:
-            tokens = tokens | {f"loc:{t}" for t in loc_key.split(" ") if t}
-        item["_tokens"] = tokens
-
-        best_idx = None
-        best_sim = 0.0
-        for i, c_tokens in enumerate(centroids):
-            sim = _jaccard(tokens, c_tokens)
-            if sim < similarity_threshold and (len(tokens) <= 6 or len(c_tokens) <= 6):
-                # short messages often tokenize poorly; try character similarity
-                sim = max(sim, SequenceMatcher(None, item.get("text", ""), clusters[i][0].get("text", "")).ratio())
-
-            # If both have a location key and it differs, down-weight similarity.
-            if loc_key:
-                other_loc = clusters[i][0].get("_loc_key", "") or ""
-                if other_loc and other_loc != loc_key:
-                    sim *= 0.65
-            if sim > best_sim:
-                best_sim = sim
-                best_idx = i
-
-        if best_idx is not None and best_sim >= similarity_threshold:
-            clusters[best_idx].append(item)
-            # centroid = union of tokens (keeps cluster broad enough)
-            centroids[best_idx] = centroids[best_idx] | tokens
-        else:
-            clusters.append([item])
-            centroids.append(tokens)
-
-    return clusters
-
-def _confidence_from_reports(unique_reporters: int, total_reports: int) -> float:
-    # Smooth logistic-ish curve so it grows quickly early then saturates near 1.0.
-    # Using unique reporters primarily, total reports as a tiny bonus.
-    u = max(0, unique_reporters)
-    t = max(0, total_reports)
-    x = u + 0.25 * max(0, t - u)
-    return float(1.0 / (1.0 + exp(-(x - 2.0) / 1.5)))
 
 _KNOWN_AREAS = [
     # Dubai
@@ -731,6 +484,8 @@ _CACHE_TTL_SECONDS = 10 * 60
 _CACHE_VERSION = 4
 _CACHE_PATH = Path(__file__).resolve().parent / "cache_news.json"
 _NEWS_CACHE: dict = {"ts": 0.0, "data": None}
+_CACHE_LOCK = threading.Lock() # Protects access to _NEWS_CACHE
+_FETCH_LOCK = threading.Lock() # Ensures only one refresh happens at a time
 
 def _load_news_cache_from_disk() -> None:
     try:
@@ -757,18 +512,54 @@ def _save_news_cache_to_disk(ts: float, data: list) -> None:
         return
 
 def _get_cached_news() -> Optional[list]:
-    now = time.time()
-    ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
-    data = _NEWS_CACHE.get("data", None)
-    if isinstance(data, list) and (now - ts) <= _CACHE_TTL_SECONDS:
-        return data
+    with _CACHE_LOCK:
+        now = time.time()
+        ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
+        data = _NEWS_CACHE.get("data", None)
+        if isinstance(data, list) and (now - ts) <= _CACHE_TTL_SECONDS:
+            return data
     return None
 
 def _set_cached_news(data: list) -> None:
     ts = time.time()
-    _NEWS_CACHE["ts"] = ts
-    _NEWS_CACHE["data"] = data
+    with _CACHE_LOCK:
+        _NEWS_CACHE["ts"] = ts
+        _NEWS_CACHE["data"] = data
     _save_news_cache_to_disk(ts, data)
+
+def _refresh_news_data() -> list:
+    """
+    Internal logic to perform the fetch and aggregation.
+    Uses _FETCH_LOCK to ensure only one thread/process does this at a time.
+    """
+    with _FETCH_LOCK:
+        # Double check if another thread refreshed while we waited for the lock
+        cached = _get_cached_news()
+        if cached is not None:
+            return cached
+
+        print("Refreshing news data from external sources...")
+        megathread_links = get_recent_megathread_links()
+        print(f"Found reddit megathread links: {megathread_links}")
+
+        all_comments = []
+        if megathread_links:
+            raw = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=16)
+            aggregated_comments = aggregate_reddit_comments_gemini(raw)
+            all_comments.extend(aggregated_comments)
+
+        _set_cached_news(all_comments)
+        return all_comments
+
+def _background_cache_updater():
+    """Loop that refreshes the cache every 10 minutes."""
+    print("Background cache updater thread started.")
+    while True:
+        try:
+            _refresh_news_data()
+        except Exception as e:
+            print(f"Error in background cache refresh: {e}")
+        time.sleep(_CACHE_TTL_SECONDS)
 
 _load_news_cache_from_disk()
 
@@ -817,7 +608,7 @@ def fetch_uae_gov_alerts():
     return [
         {
             "id": "gov1",
-            "timestamp": str(datetime.datetime.now()),
+            "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
             "source": "UAE Ministry of Interior",
             "category": "Shelter Alert",
             "location": "Abu Dhabi",
@@ -827,29 +618,20 @@ def fetch_uae_gov_alerts():
         }
     ]
 
+@app.on_event("startup")
+async def startup_event():
+    # Start the background refresh thread
+    thread = threading.Thread(target=_background_cache_updater, daemon=True)
+    thread.start()
+
 @app.get("/news", response_model=List[NewsItem])
 def get_news():
     cached = _get_cached_news()
     if cached is not None:
         return [NewsItem(**comment) for comment in cached]
 
-    # Collect and aggregate last 24 hours of reported events.
-    # megathread_links = get_recent_megathread_links(count=1)
-    megathread_links = get_recent_megathread_links()
-    print(f"Found reddit megathread links: {megathread_links}")
-
-    all_comments = []
-    if megathread_links:
-        raw = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=16)
-        aggregated_comments = aggregate_reddit_comments_gemini(raw)
-        all_comments.extend(aggregated_comments)
-    # Add X (Twitter) and official sources
-    # all_comments.extend(fetch_x_twitter_reports())
-    # all_comments.extend(fetch_uae_gov_alerts())
-    # print(f"Comments: {all_comments}")
-    # return [NewsItem(id=i+1, **item) for i, item in enumerate(all_comments)]
-    # Cache the processed results for the next 10 minutes.
-    _set_cached_news(all_comments)
+    # If cache is empty/stale (e.g. at startup before first bg refresh), trigger it manually.
+    all_comments = _refresh_news_data()
     return [NewsItem(**comment) for comment in all_comments]
 
 @app.get("/areas", response_model=List[AreaStatus])

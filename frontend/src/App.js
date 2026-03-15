@@ -121,7 +121,7 @@ function App() {
                     Severity: {sev}/10<br/>
                     {area.lastUpdated && (
                       <>
-                        Last update: {new Date(area.lastUpdated).toLocaleTimeString()}<br/>
+                        Last update: {new Date(area.lastUpdated).toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}<br/>
                       </>
                     )}
                     {area.activeAlerts && area.activeAlerts.length > 0 && (
@@ -138,12 +138,6 @@ function App() {
           <div className="news-list">
             {sortedNews.map(item => {
               const dt = new Date(item.timestamp);
-              const dateStr = dt.toLocaleDateString(undefined, {
-                weekday: 'short',
-                month: 'short',
-                day: 'numeric',
-              });
-              const timeStr = dt.toLocaleTimeString();
               return (
               <div
                 className="news-card"
@@ -151,12 +145,16 @@ function App() {
                 style={{ borderLeftColor: severityToColor(item.severity) }}
               >
                 <div className="news-header">
-                  {/* <span className="news-category">[{item.category}]</span> */}
                   <span className="news-source">{item.source}</span>
                   <span className="news-location">{item.location}</span>
                   <span className="news-location">Severity: {clamp(Number(item.severity) || 1, 1, 10)}/10</span>
                   <span className="news-time">
-                    {dateStr} {timeStr}
+                    {dt.toLocaleDateString('en-AE', {
+                      weekday: 'short',
+                      month: 'short',
+                      day: 'numeric',
+                      timeZone: 'Asia/Dubai'
+                    })} {dt.toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}
                   </span>
                 </div>
                 <div className="news-body">{item.summary}</div>
