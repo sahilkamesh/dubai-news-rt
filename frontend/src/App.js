@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './App.css';
-import { MapContainer, TileLayer, Polygon, Tooltip } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
 // Simple approximate polygons per known area.
@@ -83,7 +83,9 @@ function App() {
               attribution="&copy; OpenStreetMap contributors &copy; CARTO"
             />
             {areas.map(area => {
-              const geom = AREA_GEOMETRIES[area.area];
+              // const geom = AREA_GEOMETRIES[area.area];
+              const geom = area.coordinates;
+              // console.log(geom)  
               if (!geom) {
                 return null;
               }
@@ -107,10 +109,12 @@ function App() {
               }
 
               return (
-                <Polygon
-                  key={area.area}
-                  positions={geom}
-                  pathOptions={{ color, fillColor: color, fillOpacity: opacity }}
+                <Circle
+                key={area.area}
+                positions={geom}
+                center={geom} 
+                radius={1000} 
+                pathOptions={{ color, fillColor: color, fillOpacity: opacity }}
                 >
                   <Tooltip>
                     <b>{area.area}</b><br/>
@@ -124,7 +128,7 @@ function App() {
                       <span>Alerts: {area.activeAlerts.join(', ')}</span>
                     )}
                   </Tooltip>
-                </Polygon>
+                </Circle>
               );
             })}
           </MapContainer>
@@ -147,7 +151,7 @@ function App() {
                 style={{ borderLeftColor: severityToColor(item.severity) }}
               >
                 <div className="news-header">
-                  <span className="news-category">[{item.category}]</span>
+                  {/* <span className="news-category">[{item.category}]</span> */}
                   <span className="news-source">{item.source}</span>
                   <span className="news-location">{item.location}</span>
                   <span className="news-location">Severity: {clamp(Number(item.severity) || 1, 1, 10)}/10</span>
@@ -155,7 +159,7 @@ function App() {
                     {dateStr} {timeStr}
                   </span>
                 </div>
-                <div className="news-body">{item.text}</div>
+                <div className="news-body">{item.summary}</div>
                 <a href={item.link} target="_blank" rel="noopener noreferrer">Source</a>
               </div>
             );})}

@@ -11,12 +11,22 @@ from pathlib import Path
 
 load_dotenv()
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Setup Gemini (Free Tier: 1,500 requests per day)
+import google.generativeai as genai
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel(
+    model_name="gemini-2.5-flash",
+    system_instruction="Extract security incidents in UAE from Reddit comments. Return ONLY valid JSON."
+)
 
 import requests
 import json
 import re
 import threading
+
+
 from difflib import SequenceMatcher
 from math import exp
 from collections import Counter
@@ -80,12 +90,9 @@ def collect_reddit_raw_comments_last_24h(start_json_url: str, hours: int = 24, m
             timestamp += datetime.timedelta(hours=4)
             raw.append({
                 "id": cid,
-                "created_utc": created,
                 "timestamp": str(timestamp),
                 "source": "Reddit",
                 "category": "User Report",
-                "location": "Unknown",
-                "severity": 1,
                 "text": body,
                 "link": f"https://reddit.com{cdata.get('permalink', '')}",
                 "author": cdata.get("author") or "unknown",
@@ -141,6 +148,73 @@ def _extract_previous_megathread_json_url(thread_json: list) -> Optional[str]:
             return url.rstrip("/") + "/.json"
 
     return candidates[0].rstrip("/") + "/.json" if candidates else None
+
+'''
+AGGREGATION
+'''
+
+"""
+Aggregates Reddit comments into major report clusters using the Gemini API.
+This function sends the relevant comments to Gemini, asks for summary clusters,
+and returns a list of dicts representing the aggregated reports.
+Requires GEMINI_API_KEY to be set in the environment.
+"""
+def aggregate_reddit_comments_gemini(raw_comments : List[dict]) -> List[dict]:
+
+    import os
+    import requests
+
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+    if not GEMINI_API_KEY:
+        # If not set, fallback to no aggregation, just return the comments as is
+        return raw_comments
+
+    input_data_str = ""
+    for c in raw_comments:
+        txt = c.get("text") or ""
+        if txt.strip():
+            input_data_str += f"\n---\nTimestamp: {c.get('timestamp')}, link: {c.get('link')}, body: {txt.strip()[:1000]}"
+
+    if not input_data_str:
+        return []
+
+    # Compose the prompt for Gemini
+    prompt = f"""
+        Analyze user reports from r/dubai. Only consider comments with real reports of incidents seen or heard,
+        and with a location. Ensure to ignore off-topic or irrelevant items or questions. Identify specific 
+        areas affected by incidents, and the types of incidents (ex interception seen, interception heard, Missile seen, loud noise etc.)
+        Please group related incidents (similar area and time) into distinct event reports, each with a summary,
+        a confidence score, a severity score from 1-10, a location, and the earliest time the indicent was reported.
+        For each cluster, respond as a JSON object with fields: summary, severity score, timestamp, location, and link to earliest comment.
+        Format the output as a JSON list like:
+        [
+        {{"location": "DIFC", "coordinates": [25.0805, 55.1411], "incident": "Interception heard", "confidence": "high",
+          "summary": "Multiple users reporting...", "severity": 5, "timestamp" : <earliest relevant timestamp str>,
+          "link" : <link to earliest comment link>}},
+        ]
+
+        Data:
+        {input_data_str}
+    """
+    # print(prompt)
+
+    # Call Gemini via PaLM/v1 API (Google generative API)
+    api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{
+            "parts": [
+                {"text": prompt}
+            ]
+        }]
+    }
+    # Use JSON mode for 100% parseable output
+    response = model.generate_content(
+        prompt, 
+        generation_config={"response_mime_type": "application/json"}
+    )
+    return json.loads(response.text)
+
 
 # Fetch comments from a Reddit megathread .json endpoint
 _STOPWORDS = {
@@ -565,156 +639,6 @@ def _summarize_cluster(cluster: List[dict]) -> str:
         return f"{event_type.capitalize()} reported near {loc}. ({count} report{'s' if count != 1 else ''})"
     return f"{event_type.capitalize()} reported. ({count} report{'s' if count != 1 else ''})"
 
-def fetch_reddit_comments_from_json(json_url, max_comments=1000):
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; uae-news-app/0.1)"}
-    resp = requests.get(json_url, headers=headers)
-    if resp.status_code != 200:
-        return []
-    data = resp.json()
-    raw_items = []
-    # Comments are in the second element of the JSON
-    for i, c in enumerate(data[1]["data"]["children"]):
-        if c["kind"] != "t1":
-            continue
-        cdata = c["data"]
-        body = cdata.get("body", "") or ""
-        raw_items.append({
-            "id": cdata["id"],
-            "timestamp": str(datetime.datetime.utcfromtimestamp(cdata["created_utc"])),
-            "source": "Reddit",
-            "category": "User Report",
-            "location": "Unknown",
-            "severity": 3,
-            "text": body,
-            "link": f"https://reddit.com{cdata.get('permalink', '')}",
-            "author": cdata.get("author") or "unknown",
-        })
-        # Pull more raw comments to enable aggregation; output is capped later.
-        if len(raw_items) >= max(60, max_comments * 8):
-            break
-
-    # Score + filter relevant comments
-    for it in raw_items:
-        it["_relevance"] = _relevance_score(it.get("text", ""))
-        it["_severity"] = _clamp_severity_1_10(_classify_severity(it.get("text", "")))
-
-    relevant = [it for it in raw_items if it["_relevance"] >= 1.5 and _is_event_report(it.get("text", ""))]
-    # Safety valve: if we filtered too aggressively (e.g., thread format changed),
-    # fall back to top raw comments rather than returning nothing.
-    if not relevant:
-        relevant = sorted(raw_items, key=lambda x: x["_relevance"], reverse=True)[: max_comments]
-        for it in relevant:
-            it["severity"] = it["_severity"]
-            it["text"] = _normalize_text(it.get("text", ""))
-            it.pop("_tokens", None)
-            it.pop("_relevance", None)
-            it.pop("_severity", None)
-            it.pop("author", None)  # keep API shape stable unless aggregated
-        return relevant
-
-    # Cluster similar reports
-    clusters = _cluster_comments(relevant, similarity_threshold=0.32)
-
-    aggregated = []
-    for cluster in clusters:
-        authors = {c.get("author", "unknown") for c in cluster if c.get("author")}
-        authors.discard("unknown")
-        unique_reporters = len(authors) if authors else 0
-        total_reports = len(cluster)
-
-        severity = _clamp_severity_1_10(max(c.get("_severity", 1) for c in cluster))
-        confidence = _confidence_from_reports(unique_reporters=unique_reporters, total_reports=total_reports)
-
-        # Choose earliest timestamp for the cluster (keeps feed ordering stable)
-        ts = min(c.get("timestamp", "") for c in cluster)
-        # Link to the "best" (most relevant) comment
-        best = max(cluster, key=lambda c: (c.get("_relevance", 0.0), len(c.get("text", ""))))
-
-        # Prefer cluster location when any comment specifies an area
-        loc = None
-        for c in cluster:
-            if c.get("_loc_hint"):
-                loc = c.get("_loc_hint")
-                break
-        if not loc:
-            loc = _extract_location_hint(best.get("text", "") or "")
-
-        # Require a concrete area/location for feed inclusion.
-        if not loc:
-            continue
-
-        aggregated.append({
-            "id": f"reddit_cluster_{best.get('id')}",
-            "timestamp": ts,
-            "source": "Reddit",
-            "category": "User Report (Aggregated)",
-            "location": loc,
-            "severity": severity,
-            "confidence": round(confidence, 3),
-            "text": _summarize_cluster(cluster),
-            "link": best.get("link", ""),
-        })
-
-    # Sort by recency and cap output count
-    aggregated.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-    return aggregated[:max_comments]
-
-def _aggregate_reddit_raw_items(raw_items: List[dict], max_comments: int) -> List[dict]:
-    # Score + filter relevant comments
-    for it in raw_items:
-        it["_relevance"] = _relevance_score(it.get("text", ""))
-        it["_severity"] = _clamp_severity_1_10(_classify_severity(it.get("text", "")))
-
-    relevant = [it for it in raw_items if it["_relevance"] >= 1.5 and _is_event_report(it.get("text", ""))]
-    if not relevant:
-        relevant = sorted(raw_items, key=lambda x: x.get("_relevance", 0.0), reverse=True)[: max_comments]
-
-    # Cluster similar reports (now across all threads in the window)
-    clusters = _cluster_comments(relevant, similarity_threshold=0.32)
-
-    aggregated = []
-    for cluster in clusters:
-        authors = {c.get("author", "unknown") for c in cluster if c.get("author")}
-        authors.discard("unknown")
-        unique_reporters = len(authors) if authors else 0
-        total_reports = len(cluster)
-
-        severity = _clamp_severity_1_10(max(c.get("_severity", 1) for c in cluster))
-        confidence = _confidence_from_reports(unique_reporters=unique_reporters, total_reports=total_reports)
-
-        # Choose earliest timestamp for the cluster (keeps feed ordering stable)
-        ts = min(c.get("timestamp", "") for c in cluster)
-        # Link to the "best" (most relevant) comment
-        best = max(cluster, key=lambda c: (c.get("_relevance", 0.0), len(c.get("text", ""))))
-
-        # Prefer cluster location when any comment specifies an area
-        loc = None
-        for c in cluster:
-            if c.get("_loc_hint"):
-                loc = c.get("_loc_hint")
-                break
-        if not loc:
-            loc = _extract_location_hint(best.get("text", "") or "")
-
-        # Require a concrete area/location for feed inclusion.
-        if not loc:
-            continue
-
-        aggregated.append({
-            "id": f"reddit_cluster_{best.get('id')}",
-            "timestamp": ts,
-            "source": "Reddit",
-            "category": "User Report (Aggregated)",
-            "location": loc,
-            "severity": severity,
-            "confidence": round(confidence, 3),
-            "text": _summarize_cluster(cluster),
-            "link": best.get("link", ""),
-        })
-
-    aggregated.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-    return aggregated[:max_comments]
-
 app = FastAPI()
 
 app.add_middleware(
@@ -726,18 +650,18 @@ app.add_middleware(
 )
 
 class NewsItem(BaseModel):
-    id: str
-    timestamp: str
-    source: str
-    category: str
     location: str
+    incident: str
+    summary: str
     severity: int
-    confidence: float = 0.0
-    text: str
+    confidence: str
+    timestamp: str
+    coordinates: list[float]
     link: str
 
 class AreaStatus(BaseModel):
     area: str
+    coordinates: List[float]
     severity: int
     lastUpdated: str
     activeAlerts: List[str]
@@ -767,6 +691,7 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
         if not entry:
             by_area[loc] = {
                 "area": loc,
+                "coordinates": item.get("coordinates") or [],
                 "severity": sev,
                 "last_ts": ts_val,
                 "lastUpdated": ts_str,
@@ -793,11 +718,13 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
         areas.append(
             AreaStatus(
                 area=data["area"],
+                coordinates=data["coordinates"],
                 severity=int(data["severity"]),
                 lastUpdated=data["lastUpdated"],
                 activeAlerts=alerts,
             )
         )
+    print(areas)
     return areas
 
 _CACHE_TTL_SECONDS = 10 * 60
@@ -913,8 +840,9 @@ def get_news():
 
     all_comments = []
     if megathread_links:
-        raw = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=8)
-        all_comments.extend(_aggregate_reddit_raw_items(raw, max_comments=10000))
+        raw = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=16)
+        aggregated_comments = aggregate_reddit_comments_gemini(raw)
+        all_comments.extend(aggregated_comments)
     # Add X (Twitter) and official sources
     # all_comments.extend(fetch_x_twitter_reports())
     # all_comments.extend(fetch_uae_gov_alerts())
