@@ -6,6 +6,6 @@
     "deploy": "uv run pywrangler deploy"
   },
   "devDependencies": {
-    "wrangler": "^3.0.0"
+    "wrangler": "latest"
   }
 }

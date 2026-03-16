@@ -6,7 +6,7 @@ import requests
 import json
 import re
 import threading
-import google.generativeai as genai
+# import google.generativeai as genai - removed for Cloudflare compatibility
 import datetime
 import time
 from pathlib import Path
@@ -27,9 +27,8 @@ def get_config(key: str, default: Any = None) -> Any:
     return os.getenv(key, default)
 
 def configure_genai():
-    api_key = get_config("GEMINI_API_KEY")
-    if api_key:
-        genai.configure(api_key=api_key)
+    # genai.configure() is no longer needed as we use the REST API directly
+    pass
 
 configure_genai()
 
@@ -252,20 +251,40 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
         {input_data_str}
     """
 
+    api_key = get_config("GEMINI_API_KEY")
+    if not api_key:
+        print("CRITICAL: GEMINI_API_KEY is missing.")
+        return []
+
     errors = []
     for model_name in GEMINI_MODELS:
         try:
-            print(f"Trying Gemini model: {model_name} with {len(raw_comments)} comments")
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                system_instruction="Extract security incidents in UAE from Reddit comments. Return ONLY valid JSON."
-            )
-            response = model.generate_content(
-                prompt,
-                generation_config={"response_mime_type": "application/json"}
-            )
-            print("Gemini response:", response.text)
-            outputs = json.loads(response.text)
+            print(f"Trying Gemini model (REST): {model_name} with {len(raw_comments)} comments")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "system_instruction": {"parts": [{"text": "Extract security incidents in UAE from Reddit comments. Return ONLY valid JSON."}]},
+                "generationConfig": {"responseMimeType": "application/json"}
+            }
+            
+            resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
+            if resp.status_code != 200:
+                err_msg = f"REST Error {resp.status_code}: {resp.text}"
+                print(err_msg)
+                errors.append(err_msg)
+                if resp.status_code == 403: # Often key issue
+                   break
+                continue
+
+            resp_json = resp.json()
+            candidates = resp_json.get("candidates", [])
+            if not candidates:
+                print(f"No candidates returned from {model_name}")
+                continue
+                
+            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            print("Gemini response:", text)
+            outputs = json.loads(text)
             # Ensure ID and source for frontend
             for i, item in enumerate(outputs):
                 if not item.get("id"):

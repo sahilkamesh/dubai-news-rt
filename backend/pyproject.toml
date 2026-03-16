@@ -5,12 +5,10 @@ description = "Dubai News Aggregator Backend"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi",
-    "google-generativeai",
     "requests",
     "pydantic",
     "python-dotenv",
-    "beautifulsoup4",
-    "praw"
+    "beautifulsoup4"
 ]
 
 [tool.setuptools]
