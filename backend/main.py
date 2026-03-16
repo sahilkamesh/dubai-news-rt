@@ -1,30 +1,34 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Optional
+from typing import List, Optional, Union, Any
 from pydantic import BaseModel
-
+import requests
+import json
+import re
+import threading
+import google.generativeai as genai
 import datetime
-from dotenv import load_dotenv
-import os
 import time
 from pathlib import Path
+from dotenv import load_dotenv
+import os
 
 load_dotenv()
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Setup Gemini (Free Tier: 1,500 requests per day)
-import google.generativeai as genai
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel(
-    model_name="gemini-2.5-flash",
-    system_instruction="Extract security incidents in UAE from Reddit comments. Return ONLY valid JSON."
-)
 
-import requests
-import json
-import re
-import threading
+GEMINI_MODELS = [
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+]
+_model_index = 0
+_model_lock = threading.Lock()
+
+# Remove _get_next_model_name as we're switching to fallback logic
 
 
 from difflib import SequenceMatcher
@@ -48,9 +52,55 @@ def get_recent_megathread_links(subreddit="dubai", thread_title="Attacks Megathr
             break
     return links
 
+def _extract_comments_recursive(children: list, cutoff: float, seen_ids: set, parent_id: Optional[str] = None) -> List[dict]:
+    """Helper to traverse nested Reddit comments (replies)."""
+    extracted = []
+    for child in children:
+        if child.get("kind") != "t1":
+            continue
+        data = child.get("data", {})
+        cid = data.get("id")
+        if not cid or cid in seen_ids:
+            continue
+        
+        created = float(data.get("created_utc", 0.0) or 0.0)
+        if created < cutoff:
+            continue
+            
+        seen_ids.add(cid)
+        body = data.get("body", "") or ""
+        score = int(data.get("score", 1))
+        timestamp = datetime.datetime.fromtimestamp(created, datetime.timezone(datetime.timedelta(hours=4)))
+        
+        # Check for existence of replies
+        replies = data.get("replies")
+        has_replies = False
+        if isinstance(replies, dict):
+            reply_children = replies.get("data", {}).get("children", [])
+            has_replies = any(c.get("kind") == "t1" for c in reply_children)
+            
+        extracted.append({
+            "id": cid,
+            "parent_id": parent_id,
+            "timestamp": str(timestamp),
+            "source": "Reddit",
+            "score": score,
+            "category": "User Report",
+            "text": body,
+            "link": f"https://reddit.com{data.get('permalink', '')}",
+            "author": data.get("author") or "unknown",
+            "has_replies": has_replies,
+        })
+        
+        # Recurse into replies
+        if has_replies:
+            reply_children = replies.get("data", {}).get("children", [])
+            extracted.extend(_extract_comments_recursive(reply_children, cutoff, seen_ids, cid))
+            
+    return extracted
+
 def collect_reddit_raw_comments_last_24h(start_json_url: str, hours: int = 24, max_threads: int = 16) -> List[dict]:
     cutoff = time.time() - hours * 3600
-
     raw: List[dict] = []
     seen_comment_ids = set()
     thread_url = start_json_url
@@ -64,44 +114,24 @@ def collect_reddit_raw_comments_last_24h(start_json_url: str, hours: int = 24, m
             break
 
         children = thread_json[1].get("data", {}).get("children", [])
-        oldest_seen_in_thread = None
+        
+        # New recursive extraction
+        thread_comments = _extract_comments_recursive(children, cutoff, seen_comment_ids)
+        raw.extend(thread_comments)
 
-        for c in children:
-            if c.get("kind") != "t1":
-                continue
-            cdata = c.get("data", {})
-            cid = cdata.get("id")
-            if not cid or cid in seen_comment_ids:
-                continue
-            seen_comment_ids.add(cid)
-
-            created = float(cdata.get("created_utc", 0.0) or 0.0)
-            if oldest_seen_in_thread is None or created < oldest_seen_in_thread:
-                oldest_seen_in_thread = created
-
-            if created < cutoff:
-                # since sort=new, once we hit older-than-cutoff we can keep scanning a bit,
-                # but it's fine to just continue and allow older ones to be skipped.
-                continue
-
-            body = cdata.get("body", "") or ""
-            gst = datetime.timezone(datetime.timedelta(hours=4))
-            timestamp = datetime.datetime.fromtimestamp(created, gst)
-            raw.append({
-                "id": cid,
-                "timestamp": str(timestamp),
-                "source": "Reddit",
-                "category": "User Report",
-                "text": body,
-                "link": f"https://reddit.com{cdata.get('permalink', '')}",
-                "author": cdata.get("author") or "unknown",
-            })
-
-        # If the oldest comment we saw in this thread is still within cutoff,
-        # we might need to traverse to the previous megathread to reach further back.
-        if oldest_seen_in_thread is not None and oldest_seen_in_thread >= cutoff:
-            thread_url = _extract_previous_megathread_json_url(thread_json)
-            continue
+        if children:
+            # Check the last top-level comment to decide if we need to jump to previous megathread
+            last_top = None
+            for c in reversed(children):
+                if c.get("kind") == "t1":
+                    last_top = c.get("data") or {}
+                    break
+            
+            if last_top:
+                oldest_top = float(last_top.get("created_utc", 0.0) or 0.0)
+                if oldest_top >= cutoff:
+                    thread_url = _extract_previous_megathread_json_url(thread_json)
+                    continue
 
         break
 
@@ -158,33 +188,45 @@ This function sends the relevant comments to Gemini, asks for summary clusters,
 and returns a list of dicts representing the aggregated reports.
 Requires GEMINI_API_KEY to be set in the environment.
 """
-def aggregate_reddit_comments_gemini(raw_comments : List[dict]) -> List[dict]:
-
-    import os
-    import requests
-
-    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-    if not GEMINI_API_KEY:
-        # If not set, fallback to no aggregation, just return the comments as is
-        return raw_comments
+def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
+    """Aggregates Reddit comments with Gemini, considering upvotes and replies."""
+    if not raw_comments:
+        return []
 
     input_data_str = ""
     for c in raw_comments:
         txt = c.get("text") or ""
         if txt.strip():
-            input_data_str += f"\n---\nTimestamp: {c.get('timestamp')}, link: {c.get('link')}, body: {txt.strip()[:1000]}"
+            score_info = f", Score: {c.get('score', 1)}" if c.get("score") is not None else ""
+            parent_info = f", Parent ID: {c.get('parent_id')}" if c.get('parent_id') else ""
+            input_data_str += f"\n---\nID: {c.get('id')}{parent_info}, Timestamp: {c.get('timestamp')}{score_info}, link: {c.get('link')}, body: {txt.strip()[:150]}"
 
     if not input_data_str:
         return []
 
-    # Compose the prompt for Gemini
     prompt = f"""
-        Analyze user reports from r/dubai. Only consider comments with real reports of incidents seen or heard,
-        and with a location. Ensure to ignore off-topic or irrelevant reports or questions. Identify specific 
-        areas affected by incidents, and the types of incidents (ex interception seen, interception heard, Missile seen, loud noise etc.)
-        Please group related incidents (similar area and time) into distinct event reports, each with a summary,
-        a confidence score, a safety concern severity score from 1-10, a location, and the earliest time the indicent was reported.
-        For each cluster, respond as a JSON object with fields: summary, severity score, timestamp, location, and link to earliest comment.
+        You are a safety incident aggregator for incidents in UAE. Analyze and aggregate relevant user reports
+        regarding safety incidents (explosions, interceptions, sirens, drones, etc.) in UAE. 
+
+        Confidence Scoring:
+        - Use 'high' if the event is CORROBORATED by multiple independent users OR has a HIGH UPVOTE SCORE (e.g. 5+).
+        - Use 'medium' if it's a single specific report or has a few upvotes.
+        - Use 'low' if it's vague or lacks detail but still reports an incident.
+        
+        It is OK to include single, isolated reports if they describe a relevant incident.
+        IGNORE purely off-topic chatter, jokes, or irrelevant questions.
+        
+        Group related reports only if they -
+        1. Report similar incidents
+        2. Reported at similar times
+        3. Reported in the same or nearby areas. For example, do not group together incidents in different emirates, or from far apart areas of Dubai
+
+        Return a list of aggregated validated reports, each with a summary, confidence score,
+        safety concern severity score from 1-10, location, and earliest reported timestamp.
+
+        Context: The 'Data' below includes ID and Parent ID to show conversation hierarchy. 
+        A reply (child) often corroborates or refutes the parent comment. Use this to determine confidence.
+
         Format the output as a JSON list like:
         [
         {{"location": "DIFC", "coordinates": [25.0805, 55.1411], "incident": "Interception heard", "confidence": "high",
@@ -195,24 +237,38 @@ def aggregate_reddit_comments_gemini(raw_comments : List[dict]) -> List[dict]:
         Data:
         {input_data_str}
     """
-    # print(prompt)
 
-    # Call Gemini via PaLM/v1 API (Google generative API)
-    api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt}
-            ]
-        }]
-    }
-    # Use JSON mode for 100% parseable output
-    response = model.generate_content(
-        prompt, 
-        generation_config={"response_mime_type": "application/json"}
-    )
-    return json.loads(response.text)
+    errors = []
+    for model_name in GEMINI_MODELS:
+        try:
+            print(f"Trying Gemini model: {model_name} with {len(raw_comments)} comments")
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction="Extract security incidents in UAE from Reddit comments. Return ONLY valid JSON."
+            )
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            print("Gemini response:", response.text)
+            outputs = json.loads(response.text)
+            # Ensure ID and source for frontend
+            for i, item in enumerate(outputs):
+                if not item.get("id"):
+                    item["id"] = f"agg_{int(time.time())}_{i}"
+                if not item.get("source"):
+                    item["source"] = "Reddit Aggregation"
+            return outputs
+        except Exception as e:
+            print(f"Gemini aggregation error with {model_name}: {e}")
+            errors.append(f"{model_name}: {str(e)}")
+            if "API_KEY_INVALID" in str(e):
+                print("CRITICAL: GEMINI_API_KEY is invalid or missing.")
+                break # Don't try other models if key is invalid
+            continue
+
+    print(f"All Gemini models failed. Errors: {errors}")
+    return []
 
 _KNOWN_AREAS = [
     # Dubai
@@ -402,19 +458,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from typing import List, Optional, Union, Any
+
 class NewsItem(BaseModel):
-    location: str
-    incident: str
-    summary: str
-    severity: int
-    confidence: str
-    timestamp: str
-    coordinates: list[float]
-    link: str
+    id: str = ""
+    source: str = "Report"
+    location: str = "Unknown"
+    incident: str = "Event"
+    summary: str = ""
+    severity: int = 1
+    confidence: str = "medium"
+    timestamp: str = ""
+    coordinates: Any = None
+    link: str = ""
 
 class AreaStatus(BaseModel):
     area: str
-    coordinates: List[float]
+    coordinates: Any = None
     severity: int
     lastUpdated: str
     activeAlerts: List[str]
@@ -440,15 +500,20 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
 
         sev = int(item.get("severity") or 1)
 
+        # Normalize coordinates: if it's a list of lists, pick the first one.
+        coords = item.get("coordinates")
+        if isinstance(coords, list) and len(coords) > 0 and isinstance(coords[0], list):
+            coords = coords[0]
+
         entry = by_area.get(loc)
         if not entry:
             by_area[loc] = {
                 "area": loc,
-                "coordinates": item.get("coordinates") or [],
+                "coordinates": coords or [],
                 "severity": sev,
                 "last_ts": ts_val,
                 "lastUpdated": ts_str,
-                "activeAlerts": [str(item.get("text") or "").strip()] if item.get("text") else [],
+                "activeAlerts": [str(item.get("summary") or "").strip()] if item.get("summary") else [],
             }
         else:
             # Keep the max severity seen for this area.
@@ -459,7 +524,7 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
                 entry["last_ts"] = ts_val
                 entry["lastUpdated"] = ts_str
             # Optionally keep a small set of recent alert texts.
-            text = str(item.get("text") or "").strip()
+            text = str(item.get("summary") or "").strip()
             if text and text not in entry["activeAlerts"]:
                 entry["activeAlerts"].append(text)
 
@@ -480,10 +545,10 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
     print(areas)
     return areas
 
-_CACHE_TTL_SECONDS = 10 * 60
-_CACHE_VERSION = 4
+_CACHE_TTL_SECONDS = 15 * 60  # 15 minutes
+_CACHE_VERSION = 5
 _CACHE_PATH = Path(__file__).resolve().parent / "cache_news.json"
-_NEWS_CACHE: dict = {"ts": 0.0, "data": None}
+_NEWS_CACHE: dict = {"ts": 0.0, "data": None, "raw_count": 0}
 _CACHE_LOCK = threading.Lock() # Protects access to _NEWS_CACHE
 _FETCH_LOCK = threading.Lock() # Ensures only one refresh happens at a time
 
@@ -498,34 +563,49 @@ def _load_news_cache_from_disk() -> None:
             return
         ts = float(payload.get("ts", 0.0) or 0.0)
         data = payload.get("data", None)
+        raw_count = int(payload.get("raw_count", 0) or 0)
         if isinstance(data, list):
             _NEWS_CACHE["ts"] = ts
             _NEWS_CACHE["data"] = data
+            _NEWS_CACHE["raw_count"] = raw_count
     except Exception:
         # Cache should never break the API.
         return
 
-def _save_news_cache_to_disk(ts: float, data: list) -> None:
+def _save_news_cache_to_disk(ts: float, data: list, raw_count: int) -> None:
     try:
-        _CACHE_PATH.write_text(json.dumps({"version": _CACHE_VERSION, "ts": ts, "data": data}), encoding="utf-8")
+        _CACHE_PATH.write_text(json.dumps({
+            "version": _CACHE_VERSION, 
+            "ts": ts, 
+            "data": data,
+            "raw_count": raw_count
+        }), encoding="utf-8")
     except Exception:
         return
 
-def _get_cached_news() -> Optional[list]:
+def _get_cached_news_entry() -> dict:
     with _CACHE_LOCK:
-        now = time.time()
-        ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
-        data = _NEWS_CACHE.get("data", None)
-        if isinstance(data, list) and (now - ts) <= _CACHE_TTL_SECONDS:
-            return data
+        return {
+            "ts": _NEWS_CACHE.get("ts", 0.0),
+            "data": _NEWS_CACHE.get("data"),
+            "raw_count": _NEWS_CACHE.get("raw_count", 0)
+        }
+
+def _get_cached_news() -> Optional[list]:
+    entry = _get_cached_news_entry()
+    now = time.time()
+    if isinstance(entry["data"], list) and (now - entry["ts"]) <= _CACHE_TTL_SECONDS:
+        return entry["data"]
     return None
 
-def _set_cached_news(data: list) -> None:
-    ts = time.time()
+def _set_cached_news(data: list, raw_count: int, ts: Optional[float] = None) -> None:
+    if ts is None:
+        ts = time.time()
     with _CACHE_LOCK:
         _NEWS_CACHE["ts"] = ts
         _NEWS_CACHE["data"] = data
-    _save_news_cache_to_disk(ts, data)
+        _NEWS_CACHE["raw_count"] = raw_count
+    _save_news_cache_to_disk(ts, data, raw_count)
 
 def _refresh_news_data() -> list:
     """
@@ -533,33 +613,47 @@ def _refresh_news_data() -> list:
     Uses _FETCH_LOCK to ensure only one thread/process does this at a time.
     """
     with _FETCH_LOCK:
-        # Double check if another thread refreshed while we waited for the lock
-        cached = _get_cached_news()
-        if cached is not None:
-            return cached
+        # Double check time-based TTL under lock
+        cached_data = _get_cached_news()
+        if cached_data is not None:
+            return cached_data
 
-        print("Refreshing news data from external sources...")
+        entry = _get_cached_news_entry()
+        current_data = entry["data"]
+        last_raw_count = entry["raw_count"]
+
+        print("Checking for enough new data to refresh cache...")
         megathread_links = get_recent_megathread_links()
-        print(f"Found reddit megathread links: {megathread_links}")
-
+        
         all_comments = []
         if megathread_links:
-            raw = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=16)
-            aggregated_comments = aggregate_reddit_comments_gemini(raw)
+            raw_comments = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=16)
+            new_count = len(raw_comments)
+            
+            # Check growth: only query Gemini if count increased by 10%+ or cache is empty
+            growth_threshold = int(last_raw_count * 1.1)
+            if current_data is not None and new_count < growth_threshold:
+                print(f"Skipping Gemini refresh. New comments ({new_count}) < 110% of last count ({last_raw_count}).")
+                # Update ts to delay next check, but keep old data
+                _set_cached_news(current_data, last_raw_count) 
+                return current_data
+
+            print(f"Executing Gemini aggregation with {new_count} comments (significant growth from {last_raw_count})...")
+            # Use qualitative filter: keep comments with upvotes OR replies
+            filtered = [c for c in raw_comments if (c.get('score', 1) > 1) or c.get('has_replies', False)]
+            
+            # Fallback if filter is too restrictive or still too large
+            if not filtered and raw_comments:
+                filtered = sorted(raw_comments, key=lambda x: (x.get('score', 0), len(x.get('text', ''))), reverse=True)[:30]
+
+            aggregated_comments = aggregate_reddit_comments_gemini(filtered)
             all_comments.extend(aggregated_comments)
+            _set_cached_news(all_comments, new_count)
+            return all_comments
+        
+        return []
 
-        _set_cached_news(all_comments)
-        return all_comments
-
-def _background_cache_updater():
-    """Loop that refreshes the cache every 10 minutes."""
-    print("Background cache updater thread started.")
-    while True:
-        try:
-            _refresh_news_data()
-        except Exception as e:
-            print(f"Error in background cache refresh: {e}")
-        time.sleep(_CACHE_TTL_SECONDS)
+# Removed background cache updater as it's now triggered by endpoints.
 
 _load_news_cache_from_disk()
 
@@ -607,38 +701,47 @@ def fetch_uae_gov_alerts():
     # For now, return dummy data
     return [
         {
-            "id": "gov1",
-            "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
+            "id": "gov_shelter_1",
             "source": "UAE Ministry of Interior",
-            "category": "Shelter Alert",
             "location": "Abu Dhabi",
+            "incident": "Shelter Alert",
+            "summary": "Shelter in place order issued for Abu Dhabi.",
             "severity": 5,
-            "text": "Shelter in place order issued for Abu Dhabi.",
+            "confidence": "high",
+            "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
+            "coordinates": [24.4667, 54.3667],
             "link": "https://twitter.com/moiuae/status/1234567890"
         }
     ]
 
-@app.on_event("startup")
-async def startup_event():
-    # Start the background refresh thread
-    thread = threading.Thread(target=_background_cache_updater, daemon=True)
-    thread.start()
+from fastapi import BackgroundTasks
 
 @app.get("/news", response_model=List[NewsItem])
-def get_news():
+def get_news(background_tasks: BackgroundTasks):
     cached = _get_cached_news()
+    
+    # Check if we need to trigger a background refresh
+    now = time.time()
+    ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
+    if cached is None or (now - ts) > _CACHE_TTL_SECONDS:
+        print("Triggering background refresh as cache is stale or empty.")
+        background_tasks.add_task(_refresh_news_data)
+
     if cached is not None:
         return [NewsItem(**comment) for comment in cached]
 
-    # If cache is empty/stale (e.g. at startup before first bg refresh), trigger it manually.
-    all_comments = _refresh_news_data()
-    return [NewsItem(**comment) for comment in all_comments]
+    # Only if cache is absolutely empty and we have no fallback data, 
+    # we might wait or return empty list. For now, empty list is safer
+    # to maintain responsiveness.
+    return []
 
 @app.get("/areas", response_model=List[AreaStatus])
-def get_areas():
-    # Derive per-area status from the same news items that power the feed.
-    # This reuses caching logic inside get_news() so we don't refetch unnecessarily.
-    news = get_news()
-    # get_news() returns a List[NewsItem]; convert to plain dicts for aggregation.
+def get_areas(background_tasks: BackgroundTasks):
+    # Same stale-while-revalidate logic for areas
+    news = get_news(background_tasks)
     raw_items = [n.dict() if isinstance(n, NewsItem) else n for n in news]
     return _build_area_status_from_news(raw_items)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)

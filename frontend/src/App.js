@@ -47,23 +47,32 @@ function App() {
 
   useEffect(() => {
     fetch('http://localhost:8000/news')
-      .then(res => res.json())
-      .then(setNews);
+      .then(res => {
+        if (!res.ok) throw new Error('News fetch failed');
+        return res.json();
+      })
+      .then(setNews)
+      .catch(err => console.error('Error fetching news:', err));
+
     fetch('http://localhost:8000/areas')
-      .then(res => res.json())
-      .then(setAreas);
+      .then(res => {
+        if (!res.ok) throw new Error('Areas fetch failed');
+        return res.json();
+      })
+      .then(setAreas)
+      .catch(err => console.error('Error fetching areas:', err));
   }, []);
 
-  const sortedNews = [...news].sort(
+  const sortedNews = Array.isArray(news) ? [...news].sort(
     (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
-  );
+  ) : [];
 
   // Map area name to safety info
   const areaStatus = Object.fromEntries(areas.map(a => [a.area, a]));
 
   return (
     <div className="App">
-      <h1>UAE Safety & News Feed</h1>
+      <h1>UAE Safety News Feed</h1>
       <div className="legend">
         <div className="severity-legend">
           <div className="severity-legend-title">Severity</div>
@@ -77,7 +86,7 @@ function App() {
       <div className="main-content">
         <div className="map">
           <h2>UAE Incident Map</h2>
-          <MapContainer center={[25.2048, 55.2708]} zoom={10} style={{height: '400px', width: '100%'}}>
+          <MapContainer center={[25.2048, 55.2708]} zoom={10} style={{ height: '400px', width: '100%' }}>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
               attribution="&copy; OpenStreetMap contributors &copy; CARTO"
@@ -86,7 +95,7 @@ function App() {
               // const geom = AREA_GEOMETRIES[area.area];
               const geom = area.coordinates;
               // console.log(geom)  
-              if (!geom) {
+              if (!geom || geom.length < 2) {
                 return null;
               }
               const sev = clamp(Number(area.severity) || 1, 1, 10);
@@ -110,22 +119,27 @@ function App() {
 
               return (
                 <Circle
-                key={area.area}
-                positions={geom}
-                center={geom} 
-                radius={1000} 
-                pathOptions={{ color, fillColor: color, fillOpacity: opacity }}
+                  key={area.area}
+                  positions={geom}
+                  center={geom}
+                  radius={1000}
+                  pathOptions={{ color, fillColor: color, fillOpacity: opacity }}
                 >
-                  <Tooltip>
-                    <b>{area.area}</b><br/>
-                    Severity: {sev}/10<br/>
+                  <Tooltip sticky={true}>
+                    <b>{area.area}</b><br />
+                    Severity: {sev}/10<br />
                     {area.lastUpdated && (
                       <>
-                        Last update: {new Date(area.lastUpdated).toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}<br/>
+                        Last update: {new Date(area.lastUpdated).toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}<br />
                       </>
                     )}
                     {area.activeAlerts && area.activeAlerts.length > 0 && (
-                      <span>Alerts: {area.activeAlerts.join(', ')}</span>
+                      <span>
+                        Alerts: {(function() {
+                          const text = area.activeAlerts.join(', ');
+                          return text.length > 180 ? text.substring(0, 180) + '...' : text;
+                        })()}
+                      </span>
                     )}
                   </Tooltip>
                 </Circle>
@@ -139,28 +153,30 @@ function App() {
             {sortedNews.map(item => {
               const dt = new Date(item.timestamp);
               return (
-              <div
-                className="news-card"
-                key={item.id}
-                style={{ borderLeftColor: severityToColor(item.severity) }}
-              >
-                <div className="news-header">
-                  <span className="news-source">{item.source}</span>
-                  <span className="news-location">{item.location}</span>
-                  <span className="news-location">Severity: {clamp(Number(item.severity) || 1, 1, 10)}/10</span>
-                  <span className="news-time">
-                    {dt.toLocaleDateString('en-AE', {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                      timeZone: 'Asia/Dubai'
-                    })} {dt.toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}
-                  </span>
+                <div
+                  className="news-card"
+                  key={item.id}
+                  style={{ borderLeftColor: severityToColor(item.severity) }}
+                >
+                  <div className="news-header">
+                    <span className="news-source">{item.source}</span>
+                    <span className="news-location">{item.location}</span>
+                    <span className="news-location">Severity: {clamp(Number(item.severity) || 1, 1, 10)}/10</span>
+                    <span className="news-time">
+                      {dt.toLocaleDateString('en-AE', {
+                        weekday: 'short',
+                        month: 'short',
+                        day: 'numeric',
+                        timeZone: 'Asia/Dubai'
+                      })} {dt.toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}
+                    </span>
+                  </div>
+                  <div className="news-title" style={{ fontWeight: 'bold', marginTop: '8px' }}>{item.incident}</div>
+                  <div className="news-body">{item.summary}</div>
+                  <a href={item.link} target="_blank" rel="noopener noreferrer">Source</a>
                 </div>
-                <div className="news-body">{item.summary}</div>
-                <a href={item.link} target="_blank" rel="noopener noreferrer">Source</a>
-              </div>
-            );})}
+              );
+            })}
           </div>
         </div>
       </div>
