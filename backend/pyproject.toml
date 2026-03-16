@@ -11,3 +11,6 @@ dependencies = [
     "beautifulsoup4",
     "praw"
 ]
+
+[tool.setuptools]
+py-modules = ["main"]

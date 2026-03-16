@@ -1,0 +1,236 @@
+2026-03-16T02:46:29.050Z	Initializing build environment...
+2026-03-16T02:46:35.523Z	Success: Finished initializing build environment
+2026-03-16T02:46:37.503Z	Cloning repository...
+2026-03-16T02:46:39.310Z	No build output detected to cache. Skipping.
+2026-03-16T02:46:39.310Z	No dependencies detected to cache. Skipping.
+2026-03-16T02:46:39.313Z	Detected the following tools from environment: 
+2026-03-16T02:46:39.315Z	Installing project dependencies: pip install -r requirements.txt
+2026-03-16T02:46:40.552Z	Collecting annotated-doc==0.0.4 (from -r requirements.txt (line 1))
+2026-03-16T02:46:40.621Z	  Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+2026-03-16T02:46:40.637Z	Collecting annotated-types==0.7.0 (from -r requirements.txt (line 2))
+2026-03-16T02:46:40.642Z	  Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+2026-03-16T02:46:40.673Z	Collecting anyio==4.12.1 (from -r requirements.txt (line 3))
+2026-03-16T02:46:40.704Z	  Using cached anyio-4.12.1-py3-none-any.whl.metadata (4.3 kB)
+2026-03-16T02:46:40.728Z	Collecting beautifulsoup4==4.14.3 (from -r requirements.txt (line 4))
+2026-03-16T02:46:40.733Z	  Downloading beautifulsoup4-4.14.3-py3-none-any.whl.metadata (3.8 kB)
+2026-03-16T02:46:40.756Z	Collecting certifi==2026.2.25 (from -r requirements.txt (line 5))
+2026-03-16T02:46:40.758Z	  Using cached certifi-2026.2.25-py3-none-any.whl.metadata (2.5 kB)
+2026-03-16T02:46:40.878Z	Collecting cffi==2.0.0 (from -r requirements.txt (line 6))
+2026-03-16T02:46:40.881Z	  Using cached cffi-2.0.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.6 kB)
+2026-03-16T02:46:41.017Z	Collecting charset-normalizer==3.4.5 (from -r requirements.txt (line 7))
+2026-03-16T02:46:41.023Z	  Downloading charset_normalizer-3.4.5-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (39 kB)
+2026-03-16T02:46:41.060Z	Collecting click==8.1.8 (from -r requirements.txt (line 8))
+2026-03-16T02:46:41.069Z	  Downloading click-8.1.8-py3-none-any.whl.metadata (2.3 kB)
+2026-03-16T02:46:41.095Z	Collecting colorama==0.4.6 (from -r requirements.txt (line 9))
+2026-03-16T02:46:41.100Z	  Downloading colorama-0.4.6-py2.py3-none-any.whl.metadata (17 kB)
+2026-03-16T02:46:41.314Z	Collecting cryptography==46.0.5 (from -r requirements.txt (line 10))
+2026-03-16T02:46:41.317Z	  Using cached cryptography-46.0.5-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (5.7 kB)
+2026-03-16T02:46:41.336Z	Collecting exceptiongroup==1.3.1 (from -r requirements.txt (line 11))
+2026-03-16T02:46:41.340Z	  Downloading exceptiongroup-1.3.1-py3-none-any.whl.metadata (6.7 kB)
+2026-03-16T02:46:41.385Z	Collecting fastapi==0.128.8 (from -r requirements.txt (line 12))
+2026-03-16T02:46:41.392Z	  Downloading fastapi-0.128.8-py3-none-any.whl.metadata (30 kB)
+2026-03-16T02:46:41.416Z	Collecting google-ai-generativelanguage==0.6.15 (from -r requirements.txt (line 13))
+2026-03-16T02:46:41.422Z	  Downloading google_ai_generativelanguage-0.6.15-py3-none-any.whl.metadata (5.7 kB)
+2026-03-16T02:46:41.455Z	Collecting google-api-core==2.30.0 (from -r requirements.txt (line 14))
+2026-03-16T02:46:41.460Z	  Downloading google_api_core-2.30.0-py3-none-any.whl.metadata (3.1 kB)
+2026-03-16T02:46:41.504Z	Collecting google-api-python-client==2.192.0 (from -r requirements.txt (line 15))
+2026-03-16T02:46:41.509Z	  Downloading google_api_python_client-2.192.0-py3-none-any.whl.metadata (7.0 kB)
+2026-03-16T02:46:41.546Z	Collecting google-auth==2.49.1 (from -r requirements.txt (line 16))
+2026-03-16T02:46:41.552Z	  Downloading google_auth-2.49.1-py3-none-any.whl.metadata (6.2 kB)
+2026-03-16T02:46:41.569Z	Collecting google-auth-httplib2==0.3.0 (from -r requirements.txt (line 17))
+2026-03-16T02:46:41.573Z	  Downloading google_auth_httplib2-0.3.0-py3-none-any.whl.metadata (3.1 kB)
+2026-03-16T02:46:41.587Z	Collecting google-generativeai==0.8.6 (from -r requirements.txt (line 18))
+2026-03-16T02:46:41.595Z	  Downloading google_generativeai-0.8.6-py3-none-any.whl.metadata (3.9 kB)
+2026-03-16T02:46:41.614Z	Collecting googleapis-common-protos==1.73.0 (from -r requirements.txt (line 19))
+2026-03-16T02:46:41.619Z	  Downloading googleapis_common_protos-1.73.0-py3-none-any.whl.metadata (9.4 kB)
+2026-03-16T02:46:42.198Z	Collecting grpcio==1.78.0 (from -r requirements.txt (line 20))
+2026-03-16T02:46:42.202Z	  Downloading grpcio-1.78.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (3.8 kB)
+2026-03-16T02:46:42.231Z	Collecting grpcio-status==1.71.2 (from -r requirements.txt (line 21))
+2026-03-16T02:46:42.240Z	  Downloading grpcio_status-1.71.2-py3-none-any.whl.metadata (1.1 kB)
+2026-03-16T02:46:42.256Z	Collecting h11==0.16.0 (from -r requirements.txt (line 22))
+2026-03-16T02:46:42.258Z	  Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+2026-03-16T02:46:42.272Z	Collecting httplib2==0.31.2 (from -r requirements.txt (line 23))
+2026-03-16T02:46:42.276Z	  Downloading httplib2-0.31.2-py3-none-any.whl.metadata (2.2 kB)
+2026-03-16T02:46:42.294Z	Collecting idna==3.11 (from -r requirements.txt (line 24))
+2026-03-16T02:46:42.296Z	  Using cached idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+2026-03-16T02:46:42.331Z	Collecting praw==7.8.1 (from -r requirements.txt (line 25))
+2026-03-16T02:46:42.337Z	  Downloading praw-7.8.1-py3-none-any.whl.metadata (9.4 kB)
+2026-03-16T02:46:42.364Z	Collecting prawcore==2.4.0 (from -r requirements.txt (line 26))
+2026-03-16T02:46:42.368Z	  Downloading prawcore-2.4.0-py3-none-any.whl.metadata (5.0 kB)
+2026-03-16T02:46:42.385Z	Collecting proto-plus==1.27.1 (from -r requirements.txt (line 27))
+2026-03-16T02:46:42.392Z	  Downloading proto_plus-1.27.1-py3-none-any.whl.metadata (2.2 kB)
+2026-03-16T02:46:42.613Z	Collecting protobuf==5.29.6 (from -r requirements.txt (line 28))
+2026-03-16T02:46:42.628Z	  Downloading protobuf-5.29.6-cp38-abi3-manylinux2014_x86_64.whl.metadata (592 bytes)
+2026-03-16T02:46:42.656Z	Collecting pyasn1==0.6.2 (from -r requirements.txt (line 29))
+2026-03-16T02:46:42.661Z	  Downloading pyasn1-0.6.2-py3-none-any.whl.metadata (8.4 kB)
+2026-03-16T02:46:42.686Z	Collecting pyasn1_modules==0.4.2 (from -r requirements.txt (line 30))
+2026-03-16T02:46:42.693Z	  Downloading pyasn1_modules-0.4.2-py3-none-any.whl.metadata (3.5 kB)
+2026-03-16T02:46:42.707Z	Collecting pycparser==2.23 (from -r requirements.txt (line 31))
+2026-03-16T02:46:42.712Z	  Downloading pycparser-2.23-py3-none-any.whl.metadata (993 bytes)
+2026-03-16T02:46:42.820Z	Collecting pydantic==2.12.5 (from -r requirements.txt (line 32))
+2026-03-16T02:46:42.825Z	  Downloading pydantic-2.12.5-py3-none-any.whl.metadata (90 kB)
+2026-03-16T02:46:43.621Z	Collecting pydantic_core==2.41.5 (from -r requirements.txt (line 33))
+2026-03-16T02:46:43.627Z	  Downloading pydantic_core-2.41.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+2026-03-16T02:46:43.661Z	Collecting pyparsing==3.3.2 (from -r requirements.txt (line 34))
+2026-03-16T02:46:43.665Z	  Downloading pyparsing-3.3.2-py3-none-any.whl.metadata (5.8 kB)
+2026-03-16T02:46:43.682Z	Collecting python-dotenv==1.2.1 (from -r requirements.txt (line 35))
+2026-03-16T02:46:43.688Z	  Downloading python_dotenv-1.2.1-py3-none-any.whl.metadata (25 kB)
+2026-03-16T02:46:43.725Z	Collecting requests==2.32.5 (from -r requirements.txt (line 36))
+2026-03-16T02:46:43.729Z	  Using cached requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+2026-03-16T02:46:43.753Z	Collecting soupsieve==2.8.3 (from -r requirements.txt (line 37))
+2026-03-16T02:46:43.763Z	  Downloading soupsieve-2.8.3-py3-none-any.whl.metadata (4.6 kB)
+2026-03-16T02:46:43.799Z	Collecting starlette==0.49.3 (from -r requirements.txt (line 38))
+2026-03-16T02:46:43.807Z	  Downloading starlette-0.49.3-py3-none-any.whl.metadata (6.4 kB)
+2026-03-16T02:46:43.855Z	Collecting tqdm==4.67.3 (from -r requirements.txt (line 39))
+2026-03-16T02:46:43.863Z	  Downloading tqdm-4.67.3-py3-none-any.whl.metadata (57 kB)
+2026-03-16T02:46:43.892Z	Collecting typing-inspection==0.4.2 (from -r requirements.txt (line 40))
+2026-03-16T02:46:43.898Z	  Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+2026-03-16T02:46:43.922Z	Collecting typing_extensions==4.15.0 (from -r requirements.txt (line 41))
+2026-03-16T02:46:43.929Z	  Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+2026-03-16T02:46:43.953Z	Collecting update-checker==0.18.0 (from -r requirements.txt (line 42))
+2026-03-16T02:46:43.956Z	  Downloading update_checker-0.18.0-py3-none-any.whl.metadata (2.3 kB)
+2026-03-16T02:46:43.973Z	Collecting uritemplate==4.2.0 (from -r requirements.txt (line 43))
+2026-03-16T02:46:43.990Z	  Downloading uritemplate-4.2.0-py3-none-any.whl.metadata (2.6 kB)
+2026-03-16T02:46:44.046Z	Collecting urllib3==2.6.3 (from -r requirements.txt (line 44))
+2026-03-16T02:46:44.051Z	  Using cached urllib3-2.6.3-py3-none-any.whl.metadata (6.9 kB)
+2026-03-16T02:46:44.084Z	Collecting uvicorn==0.39.0 (from -r requirements.txt (line 45))
+2026-03-16T02:46:44.092Z	  Downloading uvicorn-0.39.0-py3-none-any.whl.metadata (6.8 kB)
+2026-03-16T02:46:44.115Z	Collecting websocket-client==1.9.0 (from -r requirements.txt (line 46))
+2026-03-16T02:46:44.121Z	  Downloading websocket_client-1.9.0-py3-none-any.whl.metadata (8.3 kB)
+2026-03-16T02:46:44.427Z	Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+2026-03-16T02:46:44.462Z	Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+2026-03-16T02:46:44.474Z	Using cached anyio-4.12.1-py3-none-any.whl (113 kB)
+2026-03-16T02:46:44.487Z	Downloading beautifulsoup4-4.14.3-py3-none-any.whl (107 kB)
+2026-03-16T02:46:44.495Z	Using cached certifi-2026.2.25-py3-none-any.whl (153 kB)
+2026-03-16T02:46:44.499Z	Using cached cffi-2.0.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (219 kB)
+2026-03-16T02:46:44.508Z	Downloading charset_normalizer-3.4.5-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (195 kB)
+2026-03-16T02:46:44.519Z	Downloading click-8.1.8-py3-none-any.whl (98 kB)
+2026-03-16T02:46:44.531Z	Downloading colorama-0.4.6-py2.py3-none-any.whl (25 kB)
+2026-03-16T02:46:44.541Z	Using cached cryptography-46.0.5-cp311-abi3-manylinux_2_34_x86_64.whl (4.5 MB)
+2026-03-16T02:46:44.572Z	Downloading exceptiongroup-1.3.1-py3-none-any.whl (16 kB)
+2026-03-16T02:46:44.584Z	Downloading fastapi-0.128.8-py3-none-any.whl (103 kB)
+2026-03-16T02:46:44.595Z	Downloading starlette-0.49.3-py3-none-any.whl (74 kB)
+2026-03-16T02:46:44.620Z	Downloading google_ai_generativelanguage-0.6.15-py3-none-any.whl (1.3 MB)
+2026-03-16T02:46:44.650Z	   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 45.7 MB/s  0:00:00
+2026-03-16T02:46:44.655Z	Downloading google_api_core-2.30.0-py3-none-any.whl (173 kB)
+2026-03-16T02:46:44.665Z	Downloading google_auth-2.49.1-py3-none-any.whl (240 kB)
+2026-03-16T02:46:44.676Z	Downloading googleapis_common_protos-1.73.0-py3-none-any.whl (297 kB)
+2026-03-16T02:46:44.687Z	Downloading proto_plus-1.27.1-py3-none-any.whl (50 kB)
+2026-03-16T02:46:44.695Z	Downloading protobuf-5.29.6-cp38-abi3-manylinux2014_x86_64.whl (320 kB)
+2026-03-16T02:46:44.703Z	Using cached requests-2.32.5-py3-none-any.whl (64 kB)
+2026-03-16T02:46:44.706Z	Using cached idna-3.11-py3-none-any.whl (71 kB)
+2026-03-16T02:46:44.711Z	Using cached urllib3-2.6.3-py3-none-any.whl (131 kB)
+2026-03-16T02:46:44.718Z	Downloading google_api_python_client-2.192.0-py3-none-any.whl (14.8 MB)
+2026-03-16T02:46:45.012Z	   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 14.8/14.8 MB 50.2 MB/s  0:00:00
+2026-03-16T02:46:45.018Z	Downloading google_auth_httplib2-0.3.0-py3-none-any.whl (9.5 kB)
+2026-03-16T02:46:45.030Z	Downloading httplib2-0.31.2-py3-none-any.whl (91 kB)
+2026-03-16T02:46:45.038Z	Downloading pyparsing-3.3.2-py3-none-any.whl (122 kB)
+2026-03-16T02:46:45.047Z	Downloading uritemplate-4.2.0-py3-none-any.whl (11 kB)
+2026-03-16T02:46:45.079Z	Downloading google_generativeai-0.8.6-py3-none-any.whl (155 kB)
+2026-03-16T02:46:45.089Z	Downloading grpcio-1.78.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (6.7 MB)
+2026-03-16T02:46:45.225Z	   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.7/6.7 MB 49.3 MB/s  0:00:00
+2026-03-16T02:46:45.231Z	Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+2026-03-16T02:46:45.238Z	Downloading grpcio_status-1.71.2-py3-none-any.whl (14 kB)
+2026-03-16T02:46:45.244Z	Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+2026-03-16T02:46:45.250Z	Downloading praw-7.8.1-py3-none-any.whl (189 kB)
+2026-03-16T02:46:45.259Z	Downloading prawcore-2.4.0-py3-none-any.whl (17 kB)
+2026-03-16T02:46:45.267Z	Downloading pyasn1-0.6.2-py3-none-any.whl (83 kB)
+2026-03-16T02:46:45.277Z	Downloading pyasn1_modules-0.4.2-py3-none-any.whl (181 kB)
+2026-03-16T02:46:45.285Z	Downloading pycparser-2.23-py3-none-any.whl (118 kB)
+2026-03-16T02:46:45.295Z	Downloading pydantic-2.12.5-py3-none-any.whl (463 kB)
+2026-03-16T02:46:45.314Z	Downloading pydantic_core-2.41.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+2026-03-16T02:46:45.356Z	   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 48.6 MB/s  0:00:00
+2026-03-16T02:46:45.360Z	Downloading python_dotenv-1.2.1-py3-none-any.whl (21 kB)
+2026-03-16T02:46:45.369Z	Downloading soupsieve-2.8.3-py3-none-any.whl (37 kB)
+2026-03-16T02:46:45.375Z	Downloading tqdm-4.67.3-py3-none-any.whl (78 kB)
+2026-03-16T02:46:45.381Z	Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+2026-03-16T02:46:45.389Z	Downloading update_checker-0.18.0-py3-none-any.whl (7.0 kB)
+2026-03-16T02:46:45.398Z	Downloading uvicorn-0.39.0-py3-none-any.whl (68 kB)
+2026-03-16T02:46:45.405Z	Downloading websocket_client-1.9.0-py3-none-any.whl (82 kB)
+2026-03-16T02:46:45.648Z	Installing collected packages: websocket-client, urllib3, uritemplate, typing_extensions, tqdm, soupsieve, python-dotenv, pyparsing, pycparser, pyasn1, protobuf, idna, h11, exceptiongroup, colorama, click, charset-normalizer, certifi, annotated-types, annotated-doc, uvicorn, typing-inspection, requests, pydantic_core, pyasn1_modules, proto-plus, httplib2, grpcio, googleapis-common-protos, cffi, beautifulsoup4, anyio, update-checker, starlette, pydantic, prawcore, grpcio-status, cryptography, praw, google-auth, fastapi, google-auth-httplib2, google-api-core, google-api-python-client, google-ai-generativelanguage, google-generativeai
+2026-03-16T02:46:47.126Z	  Attempting uninstall: click
+2026-03-16T02:46:47.131Z	    Found existing installation: click 8.3.1
+2026-03-16T02:46:47.138Z	    Uninstalling click-8.3.1:
+2026-03-16T02:46:47.140Z	      Successfully uninstalled click-8.3.1
+2026-03-16T02:46:52.003Z	
+2026-03-16T02:46:52.008Z	Successfully installed annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.12.1 beautifulsoup4-4.14.3 certifi-2026.2.25 cffi-2.0.0 charset-normalizer-3.4.5 click-8.1.8 colorama-0.4.6 cryptography-46.0.5 exceptiongroup-1.3.1 fastapi-0.128.8 google-ai-generativelanguage-0.6.15 google-api-core-2.30.0 google-api-python-client-2.192.0 google-auth-2.49.1 google-auth-httplib2-0.3.0 google-generativeai-0.8.6 googleapis-common-protos-1.73.0 grpcio-1.78.0 grpcio-status-1.71.2 h11-0.16.0 httplib2-0.31.2 idna-3.11 praw-7.8.1 prawcore-2.4.0 proto-plus-1.27.1 protobuf-5.29.6 pyasn1-0.6.2 pyasn1_modules-0.4.2 pycparser-2.23 pydantic-2.12.5 pydantic_core-2.41.5 pyparsing-3.3.2 python-dotenv-1.2.1 requests-2.32.5 soupsieve-2.8.3 starlette-0.49.3 tqdm-4.67.3 typing-inspection-0.4.2 typing_extensions-4.15.0 update-checker-0.18.0 uritemplate-4.2.0 urllib3-2.6.3 uvicorn-0.39.0 websocket-client-1.9.0
+2026-03-16T02:46:52.992Z	Reshimming asdf python...
+2026-03-16T02:46:54.394Z	Executing user deploy command: npx wrangler deploy
+2026-03-16T02:46:56.841Z	npm warn exec The following package was not found and will be installed: wrangler@4.73.0
+2026-03-16T02:47:14.042Z	
+2026-03-16T02:47:14.043Z	 ⛅️ wrangler 4.73.0
+2026-03-16T02:47:14.043Z	───────────────────
+2026-03-16T02:47:20.761Z	▲ [WARNING] The local configuration being used (generated from your local configuration file) differs from the remote configuration of your Worker set via the Cloudflare Dashboard:
+2026-03-16T02:47:20.762Z	
+2026-03-16T02:47:20.762Z	   {
+2026-03-16T02:47:20.762Z	  -  compatibility_date: "2026-03-16"
+2026-03-16T02:47:20.762Z	  +  compatibility_date: "2024-03-31"
+2026-03-16T02:47:20.763Z	  -  workers_dev: false
+2026-03-16T02:47:20.763Z	  +  workers_dev: true
+2026-03-16T02:47:20.763Z	  -  preview_urls: false
+2026-03-16T02:47:20.763Z	  +  preview_urls: true
+2026-03-16T02:47:20.763Z	   }
+2026-03-16T02:47:20.764Z	  
+2026-03-16T02:47:20.764Z	  
+2026-03-16T02:47:20.764Z	  Deploying the Worker will override the remote configuration with your local one.
+2026-03-16T02:47:20.764Z	
+2026-03-16T02:47:20.764Z	
+2026-03-16T02:47:20.765Z	? Would you like to continue?
+2026-03-16T02:47:20.765Z	🤖 Using fallback value in non-interactive context: yes
+2026-03-16T02:47:21.022Z	▲ [WARNING] Found a `requirements.txt` file. Python requirements should now be in a `cf-requirements.txt` file.
+2026-03-16T02:47:21.022Z	
+2026-03-16T02:47:21.022Z	
+2026-03-16T02:47:21.022Z	Attaching additional modules:
+2026-03-16T02:47:21.028Z	┌────────────────────────┬────────┬──────────┐
+2026-03-16T02:47:21.028Z	│ Name                   │ Type   │ Size     │
+2026-03-16T02:47:21.029Z	├────────────────────────┼────────┼──────────┤
+2026-03-16T02:47:21.029Z	│ requirements.txt       │ text   │ 0.89 KiB │
+2026-03-16T02:47:21.029Z	├────────────────────────┼────────┼──────────┤
+2026-03-16T02:47:21.029Z	│ test_api.py            │ python │ 0.61 KiB │
+2026-03-16T02:47:21.029Z	├────────────────────────┼────────┼──────────┤
+2026-03-16T02:47:21.029Z	│ test_reddit_helpers.py │ python │ 1.13 KiB │
+2026-03-16T02:47:21.031Z	├────────────────────────┼────────┼──────────┤
+2026-03-16T02:47:21.031Z	│ Total (3 modules)      │        │ 2.64 KiB │
+2026-03-16T02:47:21.031Z	└────────────────────────┴────────┴──────────┘
+2026-03-16T02:47:21.031Z	Total Upload: 32.81 KiB / gzip: 10.46 KiB
+2026-03-16T02:47:24.828Z	Your Worker has access to the following bindings:
+2026-03-16T02:47:24.829Z	Binding                                                Resource          
+2026-03-16T02:47:24.829Z	env.NEWS_CACHE (caf5e638ccf74b3b92749b537a713920)      KV Namespace      
+2026-03-16T02:47:24.829Z	
+2026-03-16T02:47:24.837Z	
+2026-03-16T02:47:24.838Z	Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
+2026-03-16T02:47:24.839Z	
+2026-03-16T02:47:24.840Z	✘ [ERROR] A request to the Cloudflare API (/accounts/181804d3d0dc8c4cbfb73987e6b13ba7/workers/scripts/dubai-news-rt/versions) failed.
+2026-03-16T02:47:24.840Z	
+2026-03-16T02:47:24.840Z	  Uncaught Error: PythonError: Traceback (most recent call last):
+2026-03-16T02:47:24.841Z	    File "/lib/python312.zip/_pyodide/_base.py", line 502, in eval_code
+2026-03-16T02:47:24.841Z	      .run(globals, locals)
+2026-03-16T02:47:24.841Z	       ^^^^^^^^^^^^^^^^^^^^
+2026-03-16T02:47:24.841Z	    File "/lib/python312.zip/_pyodide/_base.py", line 340, in run
+2026-03-16T02:47:24.841Z	      coroutine = eval(self.code, globals, locals)
+2026-03-16T02:47:24.841Z	                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-03-16T02:47:24.841Z	    File "<exec>", line 9, in <module>
+2026-03-16T02:47:24.841Z	    File "/lib/python312.zip/_pyodide/_base.py", line 629, in pyimport_impl
+2026-03-16T02:47:24.841Z	      res = __import__(stem, fromlist=fromlist)
+2026-03-16T02:47:24.842Z	            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-03-16T02:47:24.842Z	    File "/session/metadata/main.py", line 1, in <module>
+2026-03-16T02:47:24.842Z	      from fastapi import FastAPI
+2026-03-16T02:47:24.842Z	  ModuleNotFoundError: No module named 'fastapi'
+2026-03-16T02:47:24.849Z	  
+2026-03-16T02:47:24.850Z	    at null.<anonymous> (pyodide-internal:generated/emscriptenSetup:743:14) in new_error
+2026-03-16T02:47:24.850Z	    at [object Object] in $wrap_exception
+2026-03-16T02:47:24.850Z	    at [object Object] in $pythonexc2js
+2026-03-16T02:47:24.851Z	    at null.<anonymous> (pyodide-internal:generated/emscriptenSetup:3186:29) in Module.callPyObjectKwargs
+2026-03-16T02:47:24.851Z	    at null.<anonymous> (pyodide-internal:generated/emscriptenSetup:3944:27) in callKwargs
+2026-03-16T02:47:24.851Z	    at null.<anonymous> (pyodide-internal:generated/emscriptenSetup:4754:87) in runPython
+2026-03-16T02:47:24.851Z	    at null.<anonymous> (pyodide:python-entrypoint-helper:65:17) in handleSrcImport
+2026-03-16T02:47:24.851Z	    at null.<anonymous> (pyodide:python-entrypoint-helper:178:17)
+2026-03-16T02:47:24.851Z	   [code: 10021]
+2026-03-16T02:47:24.852Z	  To learn more about this error, visit: https://developers.cloudflare.com/workers/observability/errors/#validation-errors-10021
+2026-03-16T02:47:24.852Z	
+2026-03-16T02:47:24.852Z	  
+2026-03-16T02:47:24.852Z	  If you think this is a bug, please open an issue at: https://github.com/cloudflare/workers-sdk/issues/new/choose
+2026-03-16T02:47:24.852Z	
+2026-03-16T02:47:24.852Z	
+2026-03-16T02:47:24.884Z	🪵  Logs were written to "/opt/buildhome/.config/.wrangler/logs/wrangler-2026-03-16_02-47-12_716.log"
+2026-03-16T02:47:25.062Z	Failed: error occurred while running deploy command
