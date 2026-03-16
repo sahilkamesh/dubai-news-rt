@@ -88,7 +88,7 @@ function App() {
       <div className="main-content">
         <div className="map">
           <h2>UAE Incident Map</h2>
-          <MapContainer center={[25.2048, 55.2708]} zoom={10} style={{ height: '400px', width: '100%' }}>
+          <MapContainer center={[24.71, 54.74]} zoom={8} style={{ height: '400px', width: '100%' }}>
             <TileLayer
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
               attribution="&copy; OpenStreetMap contributors &copy; CARTO"
