@@ -6,7 +6,7 @@ import requests
 import json
 import re
 import threading
-# import google.generativeai as genai - removed for Cloudflare compatibility
+import google.generativeai as genai
 import datetime
 import time
 from pathlib import Path
@@ -14,23 +14,10 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-# Fallback to os.getenv for local dev
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Global env holder for Cloudflare
-_CLOUDFLARE_ENV = None
-
-def get_config(key: str, default: Any = None) -> Any:
-    if _CLOUDFLARE_ENV and hasattr(_CLOUDFLARE_ENV, key):
-        return getattr(_CLOUDFLARE_ENV, key)
-    return os.getenv(key, default)
-
-def configure_genai():
-    # genai.configure() is no longer needed as we use the REST API directly
-    pass
-
-configure_genai()
+genai.configure(api_key=GEMINI_API_KEY)
 
 GEMINI_MODELS = [
     "gemini-2.0-flash",
@@ -251,40 +238,20 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
         {input_data_str}
     """
 
-    api_key = get_config("GEMINI_API_KEY")
-    if not api_key:
-        print("CRITICAL: GEMINI_API_KEY is missing.")
-        return []
-
     errors = []
     for model_name in GEMINI_MODELS:
         try:
-            print(f"Trying Gemini model (REST): {model_name} with {len(raw_comments)} comments")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "system_instruction": {"parts": [{"text": "Extract security incidents in UAE from Reddit comments. Return ONLY valid JSON."}]},
-                "generationConfig": {"responseMimeType": "application/json"}
-            }
-            
-            resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"})
-            if resp.status_code != 200:
-                err_msg = f"REST Error {resp.status_code}: {resp.text}"
-                print(err_msg)
-                errors.append(err_msg)
-                if resp.status_code == 403: # Often key issue
-                   break
-                continue
-
-            resp_json = resp.json()
-            candidates = resp_json.get("candidates", [])
-            if not candidates:
-                print(f"No candidates returned from {model_name}")
-                continue
-                
-            text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            print("Gemini response:", text)
-            outputs = json.loads(text)
+            print(f"Trying Gemini model: {model_name} with {len(raw_comments)} comments")
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction="Extract security incidents in UAE from Reddit comments. Return ONLY valid JSON."
+            )
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
+            )
+            print("Gemini response:", response.text)
+            outputs = json.loads(response.text)
             # Ensure ID and source for frontend
             for i, item in enumerate(outputs):
                 if not item.get("id"):
@@ -586,8 +553,6 @@ _CACHE_LOCK = threading.Lock() # Protects access to _NEWS_CACHE
 _FETCH_LOCK = threading.Lock() # Ensures only one refresh happens at a time
 
 def _load_news_cache_from_disk() -> None:
-    # On Cloudflare, we don't load from disk to memory at startup
-    if _CLOUDFLARE_ENV: return
     try:
         if not _CACHE_PATH.exists():
             return
@@ -604,10 +569,10 @@ def _load_news_cache_from_disk() -> None:
             _NEWS_CACHE["data"] = data
             _NEWS_CACHE["raw_count"] = raw_count
     except Exception:
+        # Cache should never break the API.
         return
 
 def _save_news_cache_to_disk(ts: float, data: list, raw_count: int) -> None:
-    if _CLOUDFLARE_ENV: return
     try:
         _CACHE_PATH.write_text(json.dumps({
             "version": _CACHE_VERSION, 
@@ -619,21 +584,6 @@ def _save_news_cache_to_disk(ts: float, data: list, raw_count: int) -> None:
         return
 
 def _get_cached_news_entry() -> dict:
-    # Cloudflare KV Fetch
-    if _CLOUDFLARE_ENV and hasattr(_CLOUDFLARE_ENV, "NEWS_CACHE"):
-        try:
-            val = _CLOUDFLARE_ENV.NEWS_CACHE.get("latest_news")
-            if val:
-                payload = json.loads(val)
-                if int(payload.get("version", 0)) == _CACHE_VERSION:
-                    return {
-                        "ts": float(payload.get("ts", 0.0)),
-                        "data": payload.get("data"),
-                        "raw_count": int(payload.get("raw_count", 0))
-                    }
-        except Exception as e:
-            print(f"KV Get Error: {e}")
-
     with _CACHE_LOCK:
         return {
             "ts": _NEWS_CACHE.get("ts", 0.0),
@@ -651,20 +601,6 @@ def _get_cached_news() -> Optional[list]:
 def _set_cached_news(data: list, raw_count: int, ts: Optional[float] = None) -> None:
     if ts is None:
         ts = time.time()
-    
-    # Cloudflare KV Save
-    if _CLOUDFLARE_ENV and hasattr(_CLOUDFLARE_ENV, "NEWS_CACHE"):
-        try:
-            payload = {
-                "version": _CACHE_VERSION,
-                "ts": ts,
-                "data": data,
-                "raw_count": raw_count
-            }
-            _CLOUDFLARE_ENV.NEWS_CACHE.put("latest_news", json.dumps(payload))
-        except Exception as e:
-            print(f"KV Put Error: {e}")
-
     with _CACHE_LOCK:
         _NEWS_CACHE["ts"] = ts
         _NEWS_CACHE["data"] = data
@@ -782,12 +718,11 @@ from fastapi import BackgroundTasks
 
 @app.get("/news", response_model=List[NewsItem])
 def get_news(background_tasks: BackgroundTasks):
-    entry = _get_cached_news_entry()
-    cached = entry["data"]
+    cached = _get_cached_news()
     
     # Check if we need to trigger a background refresh
     now = time.time()
-    ts = entry["ts"]
+    ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
     if cached is None or (now - ts) > _CACHE_TTL_SECONDS:
         print("Triggering background refresh as cache is stale or empty.")
         background_tasks.add_task(_refresh_news_data)
@@ -795,29 +730,18 @@ def get_news(background_tasks: BackgroundTasks):
     if cached is not None:
         return [NewsItem(**comment) for comment in cached]
 
+    # Only if cache is absolutely empty and we have no fallback data, 
+    # we might wait or return empty list. For now, empty list is safer
+    # to maintain responsiveness.
     return []
 
 @app.get("/areas", response_model=List[AreaStatus])
 def get_areas(background_tasks: BackgroundTasks):
     # Same stale-while-revalidate logic for areas
     news = get_news(background_tasks)
-    raw_items = [n.model_dump() if hasattr(n, 'model_dump') else n.dict() for n in news]
+    raw_items = [n.dict() if isinstance(n, NewsItem) else n for n in news]
     return _build_area_status_from_news(raw_items)
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
-
-# Cloudflare Workers entry point
-async def on_fetch(request, env, ctx):
-    global _CLOUDFLARE_ENV
-    _CLOUDFLARE_ENV = env
-    configure_genai() # Re-configure with potentially updated secret
-    
-    # Use the ASGI adapter provided by Cloudflare
-    try:
-        from worker import asgi
-        return await asgi.fetch(app, request, env, ctx)
-    except ImportError:
-        # Fallback for local testing if worker polyfill isn't present
-        return await asgi.fetch(app, request, env, ctx)
