@@ -193,8 +193,11 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
     if not raw_comments:
         return []
 
+    # Sort chronologically (oldest first) so Gemini naturally sees the earliest
+    # report for each group first, making "first report" identification reliable.
+    sorted_comments = sorted(raw_comments, key=lambda c: c.get("timestamp", ""))
     input_data_str = ""
-    for c in raw_comments:
+    for c in sorted_comments:
         txt = c.get("text") or ""
         if txt.strip():
             score_info = f", Score: {c.get('score', 1)}" if c.get("score") is not None else ""
@@ -223,6 +226,9 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
 
         Return a list of aggregated validated reports, each with a summary, confidence score,
         safety concern severity score from 1-10, location, and earliest reported timestamp.
+
+        For the timestamp, use the earliest timestamp among the comments in the group.
+        Also use that comment's link as the link for the aggregated report.
 
         Context: The 'Data' below includes ID and Parent ID to show conversation hierarchy. 
         A reply (child) often corroborates or refutes the parent comment. Use this to determine confidence.
