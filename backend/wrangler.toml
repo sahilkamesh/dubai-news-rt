@@ -1,0 +1,15 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "dubai-news-backend"
+main = "main.py"
+compatibility_date = "2024-03-31"
+
+# Compatibility flags for Python support
+compatibility_flags = ["python_workers"]
+
+[vars]
+# Add non-secret env vars here
+# GEMINI_API_KEY and TWITTER_BEARER_TOKEN should be set via wrangler secret put
+
+[[kv_namespaces]]
+binding = "NEWS_CACHE"
+id = "PLACEHOLDER_ID" # User needs to replace this after running 'wrangler kv:namespace create NEWS_CACHE'
