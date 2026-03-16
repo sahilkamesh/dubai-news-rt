@@ -2,20 +2,16 @@
 name = "dubai-news-rt"
 version = "0.1.0"
 description = "Dubai News Aggregator Backend"
-requires-python = ">=3.12"
 dependencies = [
     "fastapi",
+    "google-generativeai",
     "requests",
     "pydantic",
-    "python-dotenv",
-    "beautifulsoup4"
+    "python-dotenv"
 ]
-
-[tool.setuptools]
-py-modules = ["main"]
 
 [dependency-groups]
 dev = [
-    "workers-py",
-    "workers-runtime-sdk"
+  "workers-py",
+  "workers-runtime-sdk"
 ]
