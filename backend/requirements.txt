@@ -1,0 +1,7 @@
+fastapi
+google-generativeai
+requests
+pydantic
+python-dotenv
+beautifulsoup4
+praw
