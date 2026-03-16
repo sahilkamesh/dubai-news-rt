@@ -12,4 +12,4 @@ compatibility_flags = ["python_workers"]
 
 [[kv_namespaces]]
 binding = "NEWS_CACHE"
-id = "PLACEHOLDER_ID" # User needs to replace this after running 'wrangler kv:namespace create NEWS_CACHE'
+id = "caf5e638ccf74b3b92749b537a713920"
