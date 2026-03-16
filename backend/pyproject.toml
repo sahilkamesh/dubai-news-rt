@@ -1,0 +1,13 @@
+[project]
+name = "dubai-news-rt"
+version = "0.1.0"
+description = "Dubai News Aggregator Backend"
+dependencies = [
+    "fastapi",
+    "google-generativeai",
+    "requests",
+    "pydantic",
+    "python-dotenv",
+    "beautifulsoup4",
+    "praw"
+]
