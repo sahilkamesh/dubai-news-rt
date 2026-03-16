@@ -44,8 +44,14 @@ function severityToColor(sev) {
 };
 
 function App() {
-  const [news, setNews] = useState([]);
-  const [areas, setAreas] = useState([]);
+  const [news, setNews] = useState(() => {
+    const saved = localStorage.getItem('dubai_news_cache');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [areas, setAreas] = useState(() => {
+    const saved = localStorage.getItem('dubai_areas_cache');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   useEffect(() => {
     fetch(`${API_URL}/news`)
@@ -53,7 +59,12 @@ function App() {
         if (!res.ok) throw new Error('News fetch failed');
         return res.json();
       })
-      .then(setNews)
+      .then(data => {
+        if (data && data.length > 0) {
+          setNews(data);
+          localStorage.setItem('dubai_news_cache', JSON.stringify(data));
+        }
+      })
       .catch(err => console.error('Error fetching news:', err));
 
     fetch(`${API_URL}/areas`)
@@ -61,7 +72,12 @@ function App() {
         if (!res.ok) throw new Error('Areas fetch failed');
         return res.json();
       })
-      .then(setAreas)
+      .then(data => {
+        if (data && data.length > 0) {
+          setAreas(data);
+          localStorage.setItem('dubai_areas_cache', JSON.stringify(data));
+        }
+      })
       .catch(err => console.error('Error fetching areas:', err));
   }, []);
 
