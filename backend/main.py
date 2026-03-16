@@ -464,6 +464,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "timestamp": time.time()}
+
 from typing import List, Optional, Union, Any
 
 class NewsItem(BaseModel):
