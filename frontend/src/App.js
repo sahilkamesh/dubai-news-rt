@@ -3,6 +3,8 @@ import './App.css';
 import { MapContainer, TileLayer, Circle, Tooltip } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+
 // Simple approximate polygons per known area.
 // In a real app, replace this with proper GeoJSON.
 const AREA_GEOMETRIES = {
@@ -46,7 +48,7 @@ function App() {
   const [areas, setAreas] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:8000/news')
+    fetch(`${API_URL}/news`)
       .then(res => {
         if (!res.ok) throw new Error('News fetch failed');
         return res.json();
@@ -54,7 +56,7 @@ function App() {
       .then(setNews)
       .catch(err => console.error('Error fetching news:', err));
 
-    fetch('http://localhost:8000/areas')
+    fetch(`${API_URL}/areas`)
       .then(res => {
         if (!res.ok) throw new Error('Areas fetch failed');
         return res.json();
