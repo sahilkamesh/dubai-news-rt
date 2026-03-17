@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Union, Any
 from pydantic import BaseModel
@@ -20,10 +20,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
 GEMINI_MODELS = [
-    "gemini-2.5-flash",
     "gemini-3-flash",
-    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
     "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
 ]
 _model_index = 0
 _model_lock = threading.Lock()
@@ -465,8 +465,15 @@ app.add_middleware(
 )
 
 @app.get("/health")
-def health_check():
-    return {"status": "ok", "timestamp": time.time()}
+def health_check(background_tasks: BackgroundTasks):
+    # Trigger a refresh if stale, leveraging the 10-minute pings from GitHub Actions
+    now = time.time()
+    ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
+    if _NEWS_CACHE.get("data") is None or (now - ts) > _CACHE_TTL_SECONDS:
+        print("Health check triggering background refresh (cache stale/empty).")
+        background_tasks.add_task(_refresh_news_data)
+        
+    return {"status": "ok", "timestamp": now}
 
 from typing import List, Optional, Union, Any
 
@@ -632,7 +639,6 @@ def _refresh_news_data() -> list:
         current_data = entry["data"]
         last_raw_count = entry["raw_count"]
 
-        print("Checking for enough new data to refresh cache...")
         megathread_links = get_recent_megathread_links()
         
         all_comments = []
@@ -724,7 +730,7 @@ def fetch_uae_gov_alerts():
         }
     ]
 
-from fastapi import BackgroundTasks
+
 
 @app.get("/news", response_model=List[NewsItem])
 def get_news(background_tasks: BackgroundTasks):
