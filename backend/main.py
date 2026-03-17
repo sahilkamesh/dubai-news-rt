@@ -20,10 +20,10 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
 GEMINI_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-flash-latest",
     "gemini-2.5-flash",
+    "gemini-3-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.1-flash-lite",
 ]
 _model_index = 0
 _model_lock = threading.Lock()
@@ -555,7 +555,7 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
     print(areas)
     return areas
 
-_CACHE_TTL_SECONDS = 15 * 60  # 15 minutes
+_CACHE_TTL_SECONDS = 30 * 60  # 30 minutes
 _CACHE_VERSION = 5
 _CACHE_PATH = Path(__file__).resolve().parent / "cache_news.json"
 _NEWS_CACHE: dict = {"ts": 0.0, "data": None, "raw_count": 0}
@@ -640,16 +640,7 @@ def _refresh_news_data() -> list:
             raw_comments = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=16)
             new_count = len(raw_comments)
             
-            # Check growth: only query Gemini if count increased by 10%+ or cache is empty
-            # The baseline 'last_raw_count' only updates when Gemini successfully refreshes.
-            growth_threshold = int(last_raw_count * 1.1)
-            if current_data is not None and new_count < growth_threshold:
-                print(f"Skipping Gemini refresh. {new_count} comments (need {growth_threshold} for 10% growth since last Gemini update).")
-                # Update ts to throttle Reddit pings, but keep the old Gemini data and the old count baseline
-                _set_cached_news(current_data, last_raw_count) 
-                return current_data
-
-            print(f"Executing Gemini aggregation: {new_count} comments is >10% growth from baseline {last_raw_count}...")
+            print(f"Executing Gemini aggregation with {new_count} comments (scheduled refresh)...")
             
             # Use qualitative filter: keep comments with upvotes OR replies
             filtered = [c for c in raw_comments if (c.get('score', 1) > 1) or c.get('has_replies', False)]
@@ -661,11 +652,11 @@ def _refresh_news_data() -> list:
             aggregated_comments = aggregate_reddit_comments_gemini(filtered)
             
             if aggregated_comments:
-                print(f"Gemini refresh successful. New baseline: {new_count} comments.")
+                print(f"Gemini refresh successful. Data updated with {new_count} raw comments seen.")
                 _set_cached_news(aggregated_comments, new_count)
                 return aggregated_comments
             else:
-                print("Gemini returned no results or failed. Retaining stale data and original baseline.")
+                print("Gemini returned no results or failed. Retaining stale data.")
                 # Update ts to avoid immediate retry, but keep old baseline and data
                 _set_cached_news(current_data, last_raw_count)
                 return current_data if current_data is not None else []
