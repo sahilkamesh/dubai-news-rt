@@ -20,15 +20,17 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
 GEMINI_MODELS = [
-    "gemini-3-flash",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
     "gemini-2.5-flash",
-    "gemini-3.1-flash-lite",
+    "gemma-3-27b-it",
     "gemini-2.5-flash-lite",
+    "gemma-3-12b-it",
+    "gemini-2.0-flash",
 ]
-_model_index = 0
-_model_lock = threading.Lock()
 
-# Remove _get_next_model_name as we're switching to fallback logic
+# _get_next_model_name was removed as we're switching to fallback logic
 
 
 from difflib import SequenceMatcher
@@ -212,9 +214,9 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
         regarding safety incidents (explosions, interceptions, sirens, drones, etc.) in UAE. 
 
         Confidence Scoring:
-        - Use 'high' if the event is CORROBORATED by multiple independent users OR has a HIGH UPVOTE SCORE (e.g. 5+).
-        - Use 'medium' if it's a single specific report or has a few upvotes.
-        - Use 'low' if it's vague or lacks detail but still reports an incident.
+        - Use 'high' if the event is CORROBORATED by multiple independent users OR has a HIGH UPVOTE SCORE (e.g. 5+). (Represents >80% confidence)
+        - Use 'medium' if it's a single specific report or has a few upvotes. (Represents 50-80% confidence)
+        - Use 'low' if it's vague or lacks detail but still reports an incident. (Represents <50% confidence)
         
         It is OK to include single, isolated reports if they describe a relevant incident.
         IGNORE purely off-topic chatter, jokes, or irrelevant questions.
@@ -257,14 +259,18 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
                 generation_config={"response_mime_type": "application/json"}
             )
             print("Gemini response:", response.text)
-            outputs = json.loads(response.text)
+            raw_outputs = json.loads(response.text)
+            
+            # Filter out aggregations with < 50% confidence ('low')
+            filtered_outputs = [item for item in raw_outputs if str(item.get("confidence", "")).lower() != "low"]
+            
             # Ensure ID and source for frontend
-            for i, item in enumerate(outputs):
+            for i, item in enumerate(filtered_outputs):
                 if not item.get("id"):
                     item["id"] = f"agg_{int(time.time())}_{i}"
                 if not item.get("source"):
                     item["source"] = "Reddit Aggregation"
-            return outputs
+            return filtered_outputs
         except Exception as e:
             print(f"Gemini aggregation error with {model_name}: {e}")
             errors.append(f"{model_name}: {str(e)}")
@@ -275,6 +281,12 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
 
     print(f"All Gemini models failed. Errors: {errors}")
     return []
+
+def _normalize_text(text: str) -> str:
+    """Basic text normalization for location and event matching."""
+    if not text:
+        return ""
+    return " ".join(text.split()).strip()
 
 _KNOWN_AREAS = [
     # Dubai
