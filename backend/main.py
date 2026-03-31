@@ -12,10 +12,20 @@ import time
 from pathlib import Path
 from dotenv import load_dotenv
 import os
+import redis
 
 load_dotenv()
 TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+REDIS_URL = os.getenv("REDIS_URL")
+
+redis_client = None
+if REDIS_URL:
+    try:
+        redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+        print("Successfully configured Redis for caching")
+    except Exception as e:
+        print(f"Failed to configure Redis: {e}")
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -322,9 +332,21 @@ _discovered_canonical: dict = {}   # lowercase -> display name
 def _load_discovered_areas() -> None:
     global _discovered_areas, _discovered_canonical
     try:
-        if not _DISCOVERED_AREAS_PATH.exists():
+        data = None
+        if redis_client:
+            try:
+                cached_str = redis_client.get("discovered_areas")
+                if cached_str:
+                    data = json.loads(cached_str)
+            except Exception as e:
+                print(f"Redis load error for areas: {e}")
+                
+        if data is None and _DISCOVERED_AREAS_PATH.exists():
+            data = json.loads(_DISCOVERED_AREAS_PATH.read_text(encoding="utf-8"))
+            
+        if data is None:
             return
-        data = json.loads(_DISCOVERED_AREAS_PATH.read_text(encoding="utf-8"))
+            
         if isinstance(data, list):
             _discovered_areas = [str(x).strip().lower() for x in data if x]
         elif isinstance(data, dict):
@@ -342,6 +364,11 @@ def _save_discovered_area(lower_key: str, display_name: str) -> None:
         _discovered_canonical[lower_key] = display_name
         try:
             payload = {k: _discovered_canonical.get(k, k.title()) for k in _discovered_areas}
+            if redis_client:
+                try:
+                    redis_client.set("discovered_areas", json.dumps(payload))
+                except Exception as e:
+                    print(f"Redis save error for areas: {e}")
             _DISCOVERED_AREAS_PATH.write_text(json.dumps(payload, indent=0), encoding="utf-8")
         except Exception:
             pass
@@ -582,9 +609,18 @@ _FETCH_LOCK = threading.Lock() # Ensures only one refresh happens at a time
 
 def _load_news_cache_from_disk() -> None:
     try:
-        if not _CACHE_PATH.exists():
-            return
-        payload = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+        payload = None
+        if redis_client:
+            try:
+                cached_str = redis_client.get("news_cache")
+                if cached_str:
+                    payload = json.loads(cached_str)
+            except Exception as e:
+                print(f"Redis load error for news: {e}")
+                
+        if payload is None and _CACHE_PATH.exists():
+            payload = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+            
         if not isinstance(payload, dict):
             return
         if int(payload.get("version", 0) or 0) != _CACHE_VERSION:
@@ -602,12 +638,18 @@ def _load_news_cache_from_disk() -> None:
 
 def _save_news_cache_to_disk(ts: float, data: list, raw_count: int) -> None:
     try:
-        _CACHE_PATH.write_text(json.dumps({
+        payload = json.dumps({
             "version": _CACHE_VERSION, 
             "ts": ts, 
             "data": data,
             "raw_count": raw_count
-        }), encoding="utf-8")
+        })
+        if redis_client:
+            try:
+                redis_client.set("news_cache", payload)
+            except Exception as e:
+                print(f"Redis save error for news: {e}")
+        _CACHE_PATH.write_text(payload, encoding="utf-8")
     except Exception:
         return
 

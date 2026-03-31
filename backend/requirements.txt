@@ -4,3 +4,4 @@ pydantic
 python-dotenv
 uvicorn
 google-generativeai
+redis
