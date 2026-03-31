@@ -25,6 +25,25 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; }
 .news-location { color: #888; }
 .news-time { margin-left: auto; color: #aaa; }
 .news-body { margin-bottom: 0.5em; }
+
+/* Date grouping styles */
+.date-group { display: flex; flex-direction: column; gap: 0.8em; margin-bottom: 1.5em; }
+.date-section-header { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  background: #eee; 
+  padding: 0.7em 1em; 
+  font-weight: bold; 
+  border-radius: 6px; 
+  cursor: pointer; 
+  user-select: none;
+  transition: background 0.2s;
+}
+.date-section-header:hover { background: #dfdfdf; }
+.toggle-icon { font-size: 0.8em; color: #555; }
+.date-section-content { display: flex; flex-direction: column; gap: 1em; }
+
 .map { margin-top: 1em; }
 .leaflet-container { border-radius: 8px; box-shadow: 0 1px 4px #0002; }
 

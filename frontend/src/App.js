@@ -52,6 +52,22 @@ function App() {
     const saved = localStorage.getItem('dubai_areas_cache');
     return saved ? JSON.parse(saved) : [];
   });
+  const [expandedDates, setExpandedDates] = useState(() => {
+    const today = new Date().toLocaleDateString('en-AE', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'Asia/Dubai'
+    });
+    return { [today]: true };
+  });
+
+  const toggleDate = (dateStr) => {
+    setExpandedDates(prev => ({
+      ...prev,
+      [dateStr]: !prev[dateStr]
+    }));
+  };
 
   useEffect(() => {
     fetch(`${API_URL}/news`)
@@ -87,6 +103,21 @@ function App() {
 
   // Map area name to safety info
   const areaStatus = Object.fromEntries(areas.map(a => [a.area, a]));
+
+  const groupedNews = {};
+  sortedNews.forEach(item => {
+    const dt = new Date(item.timestamp);
+    const dateStr = dt.toLocaleDateString('en-AE', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'Asia/Dubai'
+    });
+    if (!groupedNews[dateStr]) {
+      groupedNews[dateStr] = [];
+    }
+    groupedNews[dateStr].push(item);
+  });
 
   return (
     <div className="App">
@@ -168,30 +199,38 @@ function App() {
         <div className="feed">
           <h2>Live News Feed</h2>
           <div className="news-list">
-            {sortedNews.map(item => {
-              const dt = new Date(item.timestamp);
+            {Object.entries(groupedNews).map(([dateStr, items]) => {
+              const isExpanded = expandedDates[dateStr];
               return (
-                <div
-                  className="news-card"
-                  key={item.id}
-                  style={{ borderLeftColor: severityToColor(item.severity) }}
-                >
-                  <div className="news-header">
-                    <span className="news-source">{item.source}</span>
-                    <span className="news-location">{item.location}</span>
-                    <span className="news-location">Severity: {clamp(Number(item.severity) || 1, 1, 10)}/10</span>
-                    <span className="news-time">
-                      {dt.toLocaleDateString('en-AE', {
-                        weekday: 'short',
-                        month: 'short',
-                        day: 'numeric',
-                        timeZone: 'Asia/Dubai'
-                      })} {dt.toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}
-                    </span>
+                <div key={dateStr} className="date-group">
+                  <div className="date-section-header" onClick={() => toggleDate(dateStr)}>
+                    <span>{dateStr}</span>
+                    <span className="toggle-icon">{isExpanded ? '▼' : '▶'}</span>
                   </div>
-                  <div className="news-title" style={{ fontWeight: 'bold', marginTop: '8px' }}>{item.incident}</div>
-                  <div className="news-body">{item.summary}</div>
-                  <a href={item.link} target="_blank" rel="noopener noreferrer">Source</a>
+                  {isExpanded && <div className="date-section-content">
+                    {items.map(item => {
+                      const dt = new Date(item.timestamp);
+                      return (
+                        <div
+                          className="news-card"
+                          key={item.id}
+                          style={{ borderLeftColor: severityToColor(item.severity) }}
+                        >
+                          <div className="news-header">
+                            <span className="news-source">{item.source}</span>
+                            <span className="news-location">{item.location}</span>
+                            <span className="news-location">Severity: {clamp(Number(item.severity) || 1, 1, 10)}/10</span>
+                            <span className="news-time">
+                              {dt.toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}
+                            </span>
+                          </div>
+                          <div className="news-title" style={{ fontWeight: 'bold', marginTop: '8px' }}>{item.incident}</div>
+                          <div className="news-body">{item.summary}</div>
+                          <a href={item.link} target="_blank" rel="noopener noreferrer">Source</a>
+                        </div>
+                      );
+                    })}
+                  </div>}
                 </div>
               );
             })}

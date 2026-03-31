@@ -101,8 +101,7 @@ def _extract_comments_recursive(children: list, cutoff: float, seen_ids: set, pa
             
     return extracted
 
-def collect_reddit_raw_comments_last_24h(start_json_url: str, hours: int = 24, max_threads: int = 16) -> List[dict]:
-    cutoff = time.time() - hours * 3600
+def collect_reddit_raw_comments(start_json_url: str, cutoff: float, max_threads: int = 16) -> List[dict]:
     raw: List[dict] = []
     seen_comment_ids = set()
     thread_url = start_json_url
@@ -655,11 +654,20 @@ def _refresh_news_data() -> list:
         
         all_comments = []
         if megathread_links:
-            raw_comments = collect_reddit_raw_comments_last_24h(megathread_links[0], hours=24, max_threads=16)
+            # Use the previous cache timestamp as the cutoff. If it doesn't exist or is 0, fetch last 24h.
+            now = time.time()
+            cutoff = entry["ts"] if entry["ts"] > 0 else (now - 24 * 3600)
+            
+            raw_comments = collect_reddit_raw_comments(megathread_links[0], cutoff=cutoff, max_threads=16)
             new_count = len(raw_comments)
             
-            print(f"Executing Gemini aggregation with {new_count} comments (scheduled refresh)...")
+            print(f"Executing Gemini aggregation with {new_count} new comments (scheduled refresh)...")
             
+            if new_count == 0:
+                print("No new comments found. Retaining existing data.")
+                _set_cached_news(current_data, last_raw_count, ts=now)
+                return current_data if current_data is not None else []
+
             # Use qualitative filter: keep comments with upvotes OR replies
             filtered = [c for c in raw_comments if (c.get('score', 1) > 1) or c.get('has_replies', False)]
             
@@ -671,12 +679,15 @@ def _refresh_news_data() -> list:
             
             if aggregated_comments:
                 print(f"Gemini refresh successful. Data updated with {new_count} raw comments seen.")
-                _set_cached_news(aggregated_comments, new_count)
-                return aggregated_comments
+                # Append new aggregations to existing data rather than replacing
+                existing_data = current_data if current_data is not None else []
+                new_data = existing_data + aggregated_comments
+                _set_cached_news(new_data, last_raw_count + new_count, ts=now)
+                return new_data
             else:
                 print("Gemini returned no results or failed. Retaining stale data.")
                 # Update ts to avoid immediate retry, but keep old baseline and data
-                _set_cached_news(current_data, last_raw_count)
+                _set_cached_news(current_data, last_raw_count, ts=now)
                 return current_data if current_data is not None else []
         
         return current_data if current_data is not None else []
@@ -767,8 +778,21 @@ def get_news(background_tasks: BackgroundTasks):
 def get_areas(background_tasks: BackgroundTasks):
     # Same stale-while-revalidate logic for areas
     news = get_news(background_tasks)
-    raw_items = [n.dict() if isinstance(n, NewsItem) else n for n in news]
-    return _build_area_status_from_news(raw_items)
+    now_ts = time.time()
+    recent_items = []
+    
+    for n in news:
+        item = n.dict() if isinstance(n, NewsItem) else n
+        try:
+            ts_val = datetime.datetime.fromisoformat(item["timestamp"]).timestamp()
+            # Only include items from the last 24 hours for the map
+            if now_ts - ts_val <= 24 * 3600:
+                recent_items.append(item)
+        except Exception:
+            # Fallback if timestamp parsing fails
+            recent_items.append(item)
+            
+    return _build_area_status_from_news(recent_items)
 
 if __name__ == "__main__":
     import uvicorn
