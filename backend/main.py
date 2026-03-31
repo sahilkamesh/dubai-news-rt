@@ -771,7 +771,7 @@ def fetch_x_twitter_reports():
                     "source": f"X (@{username})",
                     "category": "Official Alert",
                     "location": "UAE",  # Could use NLP/geotagging for more detail
-                    "severity": 4,
+                    "severity": 3 if "wam" in username or "office" in username else 7,
                     "text": t["text"],
                     "link": f"https://x.com/{username}/status/{t['id']}"
                 })
@@ -787,11 +787,23 @@ def fetch_uae_gov_alerts():
             "location": "Abu Dhabi",
             "incident": "Shelter Alert",
             "summary": "Shelter in place order issued for Abu Dhabi.",
-            "severity": 5,
+            "severity": 8,
             "confidence": "high",
             "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
             "coordinates": [24.4667, 54.3667],
             "link": "https://twitter.com/moiuae/status/1234567890"
+        },
+        {
+            "id": "gov_traffic_1",
+            "source": "Dubai Police",
+            "location": "Dubai Marina",
+            "incident": "Traffic Advisory",
+            "summary": "Minor road closure for maintenance near Marina Mall.",
+            "severity": 3,
+            "confidence": "high",
+            "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
+            "coordinates": [25.0772, 55.1403],
+            "link": "https://twitter.com/dubai_police/status/0987654321"
         }
     ]
 

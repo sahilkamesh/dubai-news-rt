@@ -61,6 +61,8 @@ function App() {
     });
     return { [today]: true };
   });
+  const [showLow, setShowLow] = useState(false);
+  const [showHigh, setShowHigh] = useState(true);
 
   const toggleDate = (dateStr) => {
     setExpandedDates(prev => ({
@@ -97,12 +99,26 @@ function App() {
       .catch(err => console.error('Error fetching areas:', err));
   }, []);
 
-  const sortedNews = Array.isArray(news) ? [...news].sort(
+  const filteredNews = Array.isArray(news) ? news.filter(item => {
+    const sev = Number(item.severity) || 1;
+    if (showLow && sev <= 5) return true;
+    if (showHigh && sev >= 6) return true;
+    return false;
+  }) : [];
+
+  const sortedNews = [...filteredNews].sort(
     (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
-  ) : [];
+  );
+
+  const filteredAreas = Array.isArray(areas) ? areas.filter(area => {
+    const sev = Number(area.severity) || 1;
+    if (showLow && sev <= 5) return true;
+    if (showHigh && sev >= 6) return true;
+    return false;
+  }) : [];
 
   // Map area name to safety info
-  const areaStatus = Object.fromEntries(areas.map(a => [a.area, a]));
+  const areaStatus = Object.fromEntries(filteredAreas.map(a => [a.area, a]));
 
   const groupedNews = {};
   sortedNews.forEach(item => {
@@ -123,6 +139,21 @@ function App() {
     <div className="App">
       <h1>UAE Safety News Feed</h1>
       <div className="legend">
+        <div className="filter-controls">
+          <span className="filter-label">Filter Severity:</span>
+          <button 
+            className={`toggle-button ${showLow ? 'active low' : ''}`}
+            onClick={() => setShowLow(!showLow)}
+          >
+            Low (0-5)
+          </button>
+          <button 
+            className={`toggle-button ${showHigh ? 'active high' : ''}`}
+            onClick={() => setShowHigh(!showHigh)}
+          >
+            High (6-10)
+          </button>
+        </div>
         <div className="severity-legend">
           <div className="severity-legend-title">Severity</div>
           <div className="severity-legend-row">
@@ -140,7 +171,7 @@ function App() {
               url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
               attribution="&copy; OpenStreetMap contributors &copy; CARTO"
             />
-            {areas.map(area => {
+            {filteredAreas.map(area => {
               // const geom = AREA_GEOMETRIES[area.area];
               const geom = area.coordinates;
               // console.log(geom)  

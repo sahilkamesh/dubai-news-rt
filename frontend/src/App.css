@@ -60,3 +60,48 @@ body { font-family: Arial, sans-serif; background: #f5f5f5; }
   padding: 8px;
   box-sizing: border-box;
 }
+
+/* Severity Filter Toggles */
+.filter-controls {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  align-items: center;
+}
+
+.filter-label {
+  font-weight: 600;
+  color: #444;
+  font-size: 0.95em;
+}
+
+.toggle-button {
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 2px solid #e0e0e0;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  color: #666;
+}
+
+.toggle-button:hover {
+  border-color: #bdbdbd;
+  background: #f8f8f8;
+}
+
+.toggle-button.active.low {
+  background: #fff9c4;
+  border-color: #fbc02d;
+  color: #827717;
+  box-shadow: 0 2px 4px rgba(251, 192, 45, 0.2);
+}
+
+.toggle-button.active.high {
+  background: #ffebee;
+  border-color: #ef5350;
+  color: #c62828;
+  box-shadow: 0 2px 4px rgba(239, 83, 80, 0.2);
+}
