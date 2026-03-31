@@ -30,9 +30,10 @@ if REDIS_URL:
 genai.configure(api_key=GEMINI_API_KEY)
 
 GEMINI_MODELS = [
-    "gemini-3.1-flash-lite-preview",
     "gemini-3.1-pro-preview",
     "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-pro",
     "gemini-2.5-flash",
     "gemma-3-27b-it",
     "gemini-2.5-flash-lite",
@@ -742,7 +743,6 @@ def fetch_x_twitter_reports():
     # List of relevant X (Twitter) usernames
     accounts = [
         "wamnews",  # Emirates News Agency
-        "TheNationalNews",
         "khaleejtimes",
         "AJENews",  # Al Jazeera English
         "admediaoffice",
