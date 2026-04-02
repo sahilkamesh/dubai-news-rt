@@ -34,7 +34,5 @@ npm install
 npm start
    ```
 
-The frontend will fetch data from the backend at `http://localhost:8000`.
-
----
-This is a prototype using dummy data. Replace with real data sources and map visualization for production use.
+The app will be available at [http://localhost:3000](http://localhost:3000) in your browser.
+The frontend communicates with the backend API running at [http://localhost:8000](http://localhost:8000).

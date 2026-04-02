@@ -15,7 +15,6 @@ import os
 import redis
 
 load_dotenv()
-TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 REDIS_URL = os.getenv("REDIS_URL")
 
@@ -40,15 +39,6 @@ GEMINI_MODELS = [
     "gemma-3-12b-it",
     "gemini-2.0-flash",
 ]
-
-# _get_next_model_name was removed as we're switching to fallback logic
-
-
-from difflib import SequenceMatcher
-from math import exp
-from collections import Counter
-
-
 
 # Find recent megathread links using Reddit's .json API
 def get_recent_megathread_links(subreddit="dubai", thread_title="Attacks Megathread", count=3):
@@ -200,7 +190,7 @@ This function sends the relevant comments to Gemini, asks for summary clusters,
 and returns a list of dicts representing the aggregated reports.
 Requires GEMINI_API_KEY to be set in the environment.
 """
-def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
+def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> Optional[List[dict]]:
     """Aggregates Reddit comments with Gemini, considering upvotes and replies."""
     if not raw_comments:
         return []
@@ -254,7 +244,7 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
         [
         {{"location": "DIFC", "coordinates": [25.0805, 55.1411], "incident": "Interception heard",
           "summary": "Multiple users reporting...", "severity": 5, "timestamp" : <earliest relevant timestamp str>,
-          "link" : <link to earliest comment link>}},
+          "link" : <link to most relevant comment>}},
         ]
 
         Data:
@@ -292,208 +282,8 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
             continue
 
     print(f"All Gemini models failed. Errors: {errors}")
-    return []
-
-def _normalize_text(text: str) -> str:
-    """Basic text normalization for location and event matching."""
-    if not text:
-        return ""
-    return " ".join(text.split()).strip()
-
-_KNOWN_AREAS = [
-    # Dubai
-    "jbr", "jlt", "marina", "dubai marina", "downtown", "downtown dubai", "business bay",
-    "barsha", "al barsha", "barsha 1", "barsha 2", "barsha 3",
-    "deira", "bur dubai", "jumeirah", "jumeirah beach", "satwa", "karama",
-    "mirdif", "al quoz", "al qusais", "rashidiya", "nad al sheba", "international city",
-    "silicon oasis", "motor city", "sports city", "dic", "dubai internet city", "media city",
-    "difc", "dubai international financial centre",
-    "jafza", "jebel ali", "jebel ali village", "jaddaf", "al jaddaf",
-    "al nahda", "al nahda 1", "al nahda 2",
-    # Other emirates/areas commonly referenced
-    "sharjah", "ajman", "rak", "ras al khaimah", "umm al quwain", "fujairah", "abu dhabi",
-]
-
-_CANONICAL_AREA = {
-    "dic": "Dubai Internet City",
-    "jbr": "JBR",
-    "jlt": "JLT",
-    "rak": "Ras Al Khaimah",
-    "al jaddaf": "Al Jaddaf",
-    "jaddaf": "Al Jaddaf",
-    "dip": "Dubai Investment Park",
-    "ad": "Abu Dhabi",
-    "difc": "DIFC",
-    "dubai international financial centre": "DIFC",
-}
-
-_DISCOVERED_AREAS_PATH = Path(__file__).resolve().parent / "known_areas_additions.json"
-_DISCOVERED_LOCK = threading.Lock()
-_discovered_areas: List[str] = []  # lowercase keys we've seen and persisted
-_discovered_canonical: dict = {}   # lowercase -> display name
-
-def _load_discovered_areas() -> None:
-    global _discovered_areas, _discovered_canonical
-    try:
-        data = None
-        if redis_client:
-            try:
-                cached_str = redis_client.get("discovered_areas")
-                if cached_str:
-                    data = json.loads(cached_str)
-            except Exception as e:
-                print(f"Redis load error for areas: {e}")
-                
-        if data is None and _DISCOVERED_AREAS_PATH.exists():
-            data = json.loads(_DISCOVERED_AREAS_PATH.read_text(encoding="utf-8"))
-            
-        if data is None:
-            return
-            
-        if isinstance(data, list):
-            _discovered_areas = [str(x).strip().lower() for x in data if x]
-        elif isinstance(data, dict):
-            _discovered_areas = [k.strip().lower() for k in data.keys() if k]
-            _discovered_canonical = {k.strip().lower(): str(v).strip() for k, v in data.items() if k}
-    except Exception:
-        pass
-
-def _save_discovered_area(lower_key: str, display_name: str) -> None:
-    global _discovered_areas, _discovered_canonical
-    with _DISCOVERED_LOCK:
-        if lower_key in _discovered_areas or lower_key in _discovered_canonical:
-            return
-        _discovered_areas.append(lower_key)
-        _discovered_canonical[lower_key] = display_name
-        try:
-            payload = {k: _discovered_canonical.get(k, k.title()) for k in _discovered_areas}
-            if redis_client:
-                try:
-                    redis_client.set("discovered_areas", json.dumps(payload))
-                except Exception as e:
-                    print(f"Redis save error for areas: {e}")
-            _DISCOVERED_AREAS_PATH.write_text(json.dumps(payload, indent=0), encoding="utf-8")
-        except Exception:
-            pass
-
-_load_discovered_areas()
-
-def _all_known_areas() -> List[str]:
-    """Known + discovered areas, longest first for matching."""
-    combined = list(_KNOWN_AREAS) + [a for a in _discovered_areas if a not in _KNOWN_AREAS]
-    return sorted(set(combined), key=len, reverse=True)
-
-def _canonical_for_area(lower_key: str, fallback_display: str) -> str:
-    if lower_key in _CANONICAL_AREA:
-        return _CANONICAL_AREA[lower_key]
-    if lower_key in _discovered_canonical:
-        return _discovered_canonical[lower_key]
-    return fallback_display
-
-def _extract_location_hint(text: str) -> Optional[str]:
-    t = _normalize_text(text)
-    tl = t.lower()
-
-    # Terms that indicate a time window or vague reference, not a place.
-    _time_like_terms = {
-        "hour", "hours", "minute", "minutes", "second", "seconds",
-        "last", "today", "tonight", "yesterday", "now", "earlier",
-        "morning", "evening", "afternoon", "night",
-    }
-
-    # 1) Direct known-area or discovered-area mentions
-    for area in _all_known_areas():
-        tokens = area.split()
-        # Skip entries that are purely time-like phrases we accidentally learned,
-        # e.g. "last hour".
-        if tokens and all(tok in _time_like_terms for tok in tokens):
-            continue
-        if re.search(rf"\b{re.escape(area)}\b", tl):
-            return _canonical_for_area(area, area.title())
-
-    # 2) "in X", "at X", "near X", "around X", "from X" (X = short place name)
-    m = re.search(r"\b(in|at|near|around|from)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s\-/']{1,35})", t, re.I)
-    if m:
-        loc = re.sub(r"[.,;:!?]+$", "", m.group(2).strip()).strip()
-        tokens = loc.lower().split()
-        if (
-            loc
-            and 1 <= len(tokens) <= 4
-            and not (set(tokens) & _time_like_terms)
-            and loc.lower() not in {"dubai", "uae", "here", "there", "my area", "the"}
-        ):
-            key = loc.lower()
-            if key not in _all_known_areas() and key not in _discovered_areas:
-                _save_discovered_area(key, loc.title() if loc.isupper() or loc.islower() else loc)
-            return _canonical_for_area(key, loc)
-
-    # 3) "X area", "X side" (e.g. "Barsha 1 area", "JBR side")
-    m = re.search(r"\b([A-Za-z0-9][A-Za-z0-9\s\-/']{1,30})\s+(?:area|side)\b", t, re.I)
-    if m:
-        loc = m.group(1).strip()
-        if loc and len(loc.split()) <= 4 and loc.lower() not in {"dubai", "uae", "my", "that", "this"}:
-            key = loc.lower()
-            if key not in _all_known_areas() and key not in _discovered_areas:
-                _save_discovered_area(key, loc.title() if loc.isupper() or loc.islower() else loc)
-            return _canonical_for_area(key, loc)
-
-    # 4) "heard/saw/... in X" or "reported in X" (keep X short to avoid clauses)
-    m = re.search(r"\b(heard|saw|seen|reported|happened|occurred)\b.*?\b(?:in|at|near)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9\s\-/']{1,30})", t, re.I)
-    if m:
-        loc = re.sub(r"[.,;:!?]+$", "", m.group(2).strip()).strip()
-        # Reject long or sentence-like fragments (e.g. "alerts are getting much longer")
-        tokens = loc.lower().split()
-        if (
-            loc
-            and 1 <= len(tokens) <= 4
-            and not (set(tokens) & _time_like_terms)
-            and loc.lower() not in {"dubai", "uae", "here", "there"}
-        ):
-            skip = {"ad", "getting", "longer", "alerts", "much", "are", "the", "and", "or"}
-            if not set(loc.lower().split()) & skip:
-                key = loc.lower()
-                if key not in _all_known_areas() and key not in _discovered_areas:
-                    _save_discovered_area(key, loc.title() if loc.isupper() or loc.islower() else loc)
-                return _canonical_for_area(key, loc)
-
     return None
 
-def _event_type_from_text(text: str) -> str:
-    t = _normalize_text(text).lower()
-    if re.search(r"\bintercept(ed|ion)?\b", t):
-        return "interception"
-    if re.search(r"\b(missile|rocket)\b", t):
-        return "missile/rocket activity"
-    if re.search(r"\b(drone|uav)\b", t):
-        return "drone activity"
-    if re.search(r"\b(debris|shrapnel|wreckage|impact)\b", t):
-        return "debris/impact report"
-    if re.search(r"\b(siren|alarm)s?\b", t):
-        return "sirens/alarms"
-    if re.search(r"\b(boom|bang|blast|explosion)s?\b", t):
-        return "explosion/boom heard"
-    if re.search(r"\b(sound|noise|rumbling)\b", t):
-        return "unusual sound"
-    return "reported event"
-
-def _summarize_cluster(cluster: List[dict]) -> str:
-    # Pick the most "relevant" comment as representative for event typing + location hint.
-    best = max(cluster, key=lambda c: (c.get("_relevance", 0.0), len(c.get("text", ""))))
-    rep_text = best.get("text", "") or ""
-
-    event_type = _event_type_from_text(rep_text)
-
-    # Try to pull a location hint from any comment in cluster
-    loc = None
-    for c in cluster:
-        loc = _extract_location_hint(c.get("text", "") or "")
-        if loc:
-            break
-
-    count = len(cluster)
-    if loc:
-        return f"{event_type.capitalize()} reported near {loc}. ({count} report{'s' if count != 1 else ''})"
-    return f"{event_type.capitalize()} reported. ({count} report{'s' if count != 1 else ''})"
 
 app = FastAPI()
 
@@ -727,7 +517,7 @@ def _refresh_news_data() -> list:
 
             aggregated_comments = aggregate_reddit_comments_gemini(raw_comments)
             
-            if aggregated_comments:
+            if aggregated_comments is not None:
                 print(f"Gemini refresh successful. Data updated with {new_count} raw comments seen.")
                 # Append new aggregations to existing data
                 existing_data = current_data if current_data is not None else []
@@ -737,7 +527,7 @@ def _refresh_news_data() -> list:
                 _set_cached_news(new_data, last_raw_count + new_count, ts=now)
                 return new_data
             else:
-                print("Gemini returned no results or failed. Retaining stale data and NOT advancing the cutoff.")
+                print("Gemini failed to provide a valid response for all models. Retaining stale data and NOT advancing the cutoff.")
                 return current_data if current_data is not None else []
         
         return current_data if current_data is not None else []
@@ -747,72 +537,18 @@ def _refresh_news_data() -> list:
 _load_news_cache_from_disk()
 
 def fetch_x_twitter_reports():
-    # List of relevant X (Twitter) usernames
-    accounts = [
-        "wamnews",  # Emirates News Agency
-        "khaleejtimes",
-        "AJENews",  # Al Jazeera English
-        "admediaoffice",
-        "DXBMediaOffice",
-        "modgovae",  # Ministry of Defence
-        "moiuae"
-    ]
-    headers = {
-        "Authorization": f"Bearer {TWITTER_BEARER_TOKEN}",
-    }
-    tweets = []
-    for username in accounts:
-        url = f"https://api.twitter.com/2/tweets/search/recent?query=from:{username}&tweet.fields=created_at,author_id&max_results=5"
-        resp = requests.get(url, headers=headers)
-        print(f"Twitter API {username} status: {resp.status_code}")
-        # try:
-        #     print(f"Response: {resp.json()}")
-        # except Exception as e:
-        #     print(f"Non-JSON response: {resp.text}")
-        if resp.status_code == 200:
-            data = resp.json()
-            for t in data.get("data", []):
-                tweets.append({
-                    "id": t["id"],
-                    "timestamp": t["created_at"],
-                    "source": f"X (@{username})",
-                    "category": "Official Alert",
-                    "location": "UAE",  # Could use NLP/geotagging for more detail
-                    "severity": 3 if "wam" in username or "office" in username else 7,
-                    "text": t["text"],
-                    "link": f"https://x.com/{username}/status/{t['id']}"
-                })
-    return tweets
+    """
+    TODO: Implement real Twitter fetching using designated official accounts.
+    Currently returns an empty list as a placeholder.
+    """
+    return []
 
 def fetch_uae_gov_alerts():
-    # TODO: Integrate scraping or API for official UAE government alerts
-    # For now, return dummy data
-    return [
-        {
-            "id": "gov_shelter_1",
-            "source": "UAE Ministry of Interior",
-            "location": "Abu Dhabi",
-            "incident": "Shelter Alert",
-            "summary": "Shelter in place order issued for Abu Dhabi.",
-            "severity": 8,
-            "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
-            "coordinates": [24.4667, 54.3667],
-            "link": "https://twitter.com/moiuae/status/1234567890"
-        },
-        {
-            "id": "gov_traffic_1",
-            "source": "Dubai Police",
-            "location": "Dubai Marina",
-            "incident": "Traffic Advisory",
-            "summary": "Minor road closure for maintenance near Marina Mall.",
-            "severity": 3,
-            "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
-            "coordinates": [25.0772, 55.1403],
-            "link": "https://twitter.com/dubai_police/status/0987654321"
-        }
-    ]
-
-
+    """
+    TODO: Integrate official UAE government alert sources or portal scraping.
+    Currently returns an empty list as a placeholder.
+    """
+    return []
 
 @app.get("/news", response_model=List[NewsItem])
 def get_news(background_tasks: BackgroundTasks):
