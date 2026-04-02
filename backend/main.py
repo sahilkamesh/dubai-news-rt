@@ -495,9 +495,21 @@ def _summarize_cluster(cluster: List[dict]) -> str:
 
 app = FastAPI()
 
+# CORS Configuration
+ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+env_frontend = os.getenv("FRONTEND_URL")
+if env_frontend:
+    ALLOWED_ORIGINS.append(env_frontend)
+else:
+    # Fallback for development if no FRONTEND_URL is set
+    ALLOWED_ORIGINS.append("*")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -663,6 +675,7 @@ def _get_cached_news_entry() -> dict:
         }
 
 def _get_cached_news() -> Optional[list]:
+    """Returns data ONLY if it is fresh. Use _get_cached_news_entry for 'stale-while-revalidate'."""
     entry = _get_cached_news_entry()
     now = time.time()
     if isinstance(entry["data"], list) and (now - entry["ts"]) <= _CACHE_TTL_SECONDS:
@@ -722,15 +735,15 @@ def _refresh_news_data() -> list:
             
             if aggregated_comments:
                 print(f"Gemini refresh successful. Data updated with {new_count} raw comments seen.")
-                # Append new aggregations to existing data rather than replacing
+                # Append new aggregations to existing data
                 existing_data = current_data if current_data is not None else []
                 new_data = existing_data + aggregated_comments
+                
+                # Update both in-memory and persistence layers (Redis/Disk)
                 _set_cached_news(new_data, last_raw_count + new_count, ts=now)
                 return new_data
             else:
-                print("Gemini returned no results or failed. Retaining stale data.")
-                # Update ts to avoid immediate retry, but keep old baseline and data
-                _set_cached_news(current_data, last_raw_count, ts=now)
+                print("Gemini returned no results or failed. Retaining stale data and NOT advancing the cutoff.")
                 return current_data if current_data is not None else []
         
         return current_data if current_data is not None else []
@@ -811,21 +824,23 @@ def fetch_uae_gov_alerts():
 
 @app.get("/news", response_model=List[NewsItem])
 def get_news(background_tasks: BackgroundTasks):
-    cached = _get_cached_news()
+    entry = _get_cached_news_entry()
+    cached_data = entry["data"]
+    ts = entry["ts"]
     
-    # Check if we need to trigger a background refresh
+    # Trigger background refresh if stale or empty
     now = time.time()
-    ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
-    if cached is None or (now - ts) > _CACHE_TTL_SECONDS:
-        print("Triggering background refresh as cache is stale or empty.")
+    if cached_data is None or (now - ts) > _CACHE_TTL_SECONDS:
+        print(f"Triggering background refresh. Cache age: {int(now - ts)}s")
         background_tasks.add_task(_refresh_news_data)
 
-    if cached is not None:
-        return [NewsItem(**comment) for comment in cached]
+    # ALWAYS return whatever we have in the cache, even if stale.
+    # This prevents the UI from showing an empty list while refreshes happen.
+    if cached_data is not None:
+        # Sort by timestamp descending so newest is always first
+        sorted_news = sorted(cached_data, key=lambda x: x.get("timestamp", ""), reverse=True)
+        return [NewsItem(**comment) for comment in sorted_news]
 
-    # Only if cache is absolutely empty and we have no fallback data, 
-    # we might wait or return empty list. For now, empty list is safer
-    # to maintain responsiveness.
     return []
 
 @app.get("/areas", response_model=List[AreaStatus])
