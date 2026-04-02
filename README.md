@@ -1,6 +1,4 @@
-# Dubai News & Safety Prototype
-
-This is a simple prototype for a real-time UAE safety and news visualization app.
+This is a real-time UAE safety news web app, published at https://uae-live.onrender.com/
 
 ## Backend (FastAPI)
 - Provides `/news` and `/areas` endpoints with dummy data.

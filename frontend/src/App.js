@@ -210,7 +210,7 @@ function App() {
                     Severity: {sev}/10<br />
                     {area.lastUpdated && (
                       <>
-                        Last update: {new Date(area.lastUpdated).toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}<br />
+                        Last update: {new Date(area.lastUpdated).toLocaleString('en-AE', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })}<br />
                       </>
                     )}
                     {area.activeAlerts && area.activeAlerts.length > 0 && (
