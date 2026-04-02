@@ -37,9 +37,9 @@ function clamp(n, min, max) {
 }
 
 function severityToColor(sev) {
-  // 1 => yellow, 10 => red (HSL 60 -> 0)
+  // 1 => green, 10 => red (HSL 120 -> 0)
   const s = clamp(Number(sev) || 1, 1, 10);
-  const hue = 60 - ((s - 1) / 9) * 60;
+  const hue = 120 - ((s - 1) / 9) * 120;
   return `hsl(${hue}, 85%, 45%)`;
 };
 
@@ -168,7 +168,7 @@ function App() {
           <h2>UAE Incident Map</h2>
           <MapContainer center={[24.71, 54.74]} zoom={8} style={{ height: '400px', width: '100%' }}>
             <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"
+              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
               attribution="&copy; OpenStreetMap contributors &copy; CARTO"
             />
             {filteredAreas.map(area => {
