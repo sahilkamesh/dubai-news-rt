@@ -220,34 +220,39 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
         return []
 
     prompt = f"""
-        You are a safety incident aggregator for incidents in UAE. Analyze and aggregate relevant user reports
+        You are a safety incident aggregator for incidents in UAE. Analyze and aggregate user reports
         regarding safety incidents (explosions, interceptions, sirens, drones, etc.) in UAE. 
 
-        Confidence Scoring:
-        - Use 'high' if the event is CORROBORATED by multiple independent users OR has a HIGH UPVOTE SCORE (e.g. 5+). (Represents >80% confidence)
-        - Use 'medium' if it's a single specific report or has a few upvotes. (Represents 50-80% confidence)
-        - Use 'low' if it's vague or lacks detail but still reports an incident. (Represents <50% confidence)
-        
-        It is OK to include single, isolated reports if they describe a relevant incident.
-        IGNORE purely off-topic chatter, jokes, or irrelevant questions.
+        CRITICAL REQUIREMENT: ONLY return incidents that are CORROBORATED by multiple people or high engagement. 
+        A report is considered corroborated if:
+        1. Multiple independent users (different IDs) report the same or similar incident at the same time and in the same or nearby area.
+        2. A report has a high upvote score (e.g. 4+), indicating community validation.
+        3. A report has multiple replies that confirm or discuss the same incident.
+
+        STRICTLY IGNORE:
+        - Single, isolated reports from one person with no upvotes or replies.
+        - Purely off-topic chatter, jokes, or irrelevant questions.
+        - General safety discussions that do not report a specific new incident.
         
         Group related reports only if they -
         1. Report similar incidents
         2. Reported at similar times
-        3. Reported in the same or nearby areas. For example, do not group together incidents in different emirates, or from far apart areas of Dubai
+        3. Reported in the same or nearby areas.
 
-        Return a list of aggregated validated reports, each with a summary, confidence score,
+        Context for Corroboration:
+        - The 'Data' below includes ID and Parent ID to show conversation hierarchy.
+        - A reply (child ID with a Parent ID) often corroborates or adds detail to the parent report.
+        - Multiple independent IDs reporting similar symptoms in the same location are the strongest evidence.
+
+        Return a list of aggregated validated reports, each with a summary,
         safety concern severity score from 1-10, location, and earliest reported timestamp.
 
         For the timestamp, use the earliest timestamp among the comments in the group.
-        Also use that comment's link as the link for the aggregated report.
-
-        Context: The 'Data' below includes ID and Parent ID to show conversation hierarchy. 
-        A reply (child) often corroborates or refutes the parent comment. Use this to determine confidence.
+        For the link, use the EXACT 'link' of the comment that provides the most informative or detailed description of the incident.
 
         Format the output as a JSON list like:
         [
-        {{"location": "DIFC", "coordinates": [25.0805, 55.1411], "incident": "Interception heard", "confidence": "high",
+        {{"location": "DIFC", "coordinates": [25.0805, 55.1411], "incident": "Interception heard",
           "summary": "Multiple users reporting...", "severity": 5, "timestamp" : <earliest relevant timestamp str>,
           "link" : <link to earliest comment link>}},
         ]
@@ -271,16 +276,13 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> List[dict]:
             print("Gemini response:", response.text)
             raw_outputs = json.loads(response.text)
             
-            # Filter out aggregations with < 50% confidence ('low')
-            filtered_outputs = [item for item in raw_outputs if str(item.get("confidence", "")).lower() != "low"]
-            
             # Ensure ID and source for frontend
-            for i, item in enumerate(filtered_outputs):
+            for i, item in enumerate(raw_outputs):
                 if not item.get("id"):
                     item["id"] = f"agg_{int(time.time())}_{i}"
                 if not item.get("source"):
                     item["source"] = "Reddit Aggregation"
-            return filtered_outputs
+            return raw_outputs
         except Exception as e:
             print(f"Gemini aggregation error with {model_name}: {e}")
             errors.append(f"{model_name}: {str(e)}")
@@ -535,7 +537,6 @@ class NewsItem(BaseModel):
     incident: str = "Event"
     summary: str = ""
     severity: int = 1
-    confidence: str = "medium"
     timestamp: str = ""
     coordinates: Any = None
     link: str = ""
@@ -724,14 +725,7 @@ def _refresh_news_data() -> list:
                 _set_cached_news(current_data, last_raw_count, ts=now)
                 return current_data if current_data is not None else []
 
-            # Use qualitative filter: keep comments with upvotes OR replies
-            filtered = [c for c in raw_comments if (c.get('score', 1) > 1) or c.get('has_replies', False)]
-            
-            # Fallback if filter is too restrictive or still too large
-            if not filtered and raw_comments:
-                filtered = sorted(raw_comments, key=lambda x: (x.get('score', 0), len(x.get('text', ''))), reverse=True)[:30]
-
-            aggregated_comments = aggregate_reddit_comments_gemini(filtered)
+            aggregated_comments = aggregate_reddit_comments_gemini(raw_comments)
             
             if aggregated_comments:
                 print(f"Gemini refresh successful. Data updated with {new_count} raw comments seen.")
@@ -801,7 +795,6 @@ def fetch_uae_gov_alerts():
             "incident": "Shelter Alert",
             "summary": "Shelter in place order issued for Abu Dhabi.",
             "severity": 8,
-            "confidence": "high",
             "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
             "coordinates": [24.4667, 54.3667],
             "link": "https://twitter.com/moiuae/status/1234567890"
@@ -813,7 +806,6 @@ def fetch_uae_gov_alerts():
             "incident": "Traffic Advisory",
             "summary": "Minor road closure for maintenance near Marina Mall.",
             "severity": 3,
-            "confidence": "high",
             "timestamp": str(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=4)))),
             "coordinates": [25.0772, 55.1403],
             "link": "https://twitter.com/dubai_police/status/0987654321"
