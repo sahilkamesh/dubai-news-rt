@@ -198,7 +198,7 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> Optional[List[
     # Sort chronologically (oldest first) so Gemini naturally sees the earliest
     # report for each group first, making "first report" identification reliable.
     sorted_comments = sorted(raw_comments, key=lambda c: c.get("timestamp", ""))
-    input_data_str = ""
+    input_data_str: str = ""
     for c in sorted_comments:
         txt = c.get("text") or ""
         if txt.strip():
@@ -312,7 +312,7 @@ def health_check(background_tasks: BackgroundTasks):
     # Trigger a refresh if stale, leveraging the 10-minute pings from GitHub Actions
     now = time.time()
     ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
-    if _NEWS_CACHE.get("data") is None or (now - ts) > _CACHE_TTL_SECONDS:
+    if (_NEWS_CACHE.get("data") is None or (now - ts) > _CACHE_TTL_SECONDS) and not _FETCH_LOCK.locked():
         print("Health check triggering background refresh (cache stale/empty).")
         background_tasks.add_task(_refresh_news_data)
         
@@ -404,7 +404,7 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
     print(areas)
     return areas
 
-_CACHE_TTL_SECONDS = 30 * 60  # 30 minutes
+_CACHE_TTL_SECONDS = 15 * 60  # 15 minutes
 _CACHE_VERSION = 5
 _CACHE_PATH = Path(__file__).resolve().parent / "cache_news.json"
 _NEWS_CACHE: dict = {"ts": 0.0, "data": None, "raw_count": 0}
@@ -414,30 +414,42 @@ _FETCH_LOCK = threading.Lock() # Ensures only one refresh happens at a time
 def _load_news_cache_from_disk() -> None:
     try:
         payload = None
+        # Primary source: Redis
         if redis_client:
             try:
                 cached_str = redis_client.get("news_cache")
                 if cached_str:
                     payload = json.loads(cached_str)
+                    print("Loaded news cache from Redis.")
             except Exception as e:
                 print(f"Redis load error for news: {e}")
                 
+        # Secondary source: Fallback to local disk if Redis returned nothing or failed
         if payload is None and _CACHE_PATH.exists():
-            payload = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+            try:
+                payload = json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+                print("Fallback: Loaded news cache from local disk.")
+            except Exception as e:
+                print(f"Local disk fallback load error: {e}")
             
         if not isinstance(payload, dict):
             return
+            
+        # Ensure we only load cache if it matches the current version
         if int(payload.get("version", 0) or 0) != _CACHE_VERSION:
+            print(f"Cache version mismatch. Expected {_CACHE_VERSION}, got {payload.get('version')}. Refreshing...")
             return
+            
         ts = float(payload.get("ts", 0.0) or 0.0)
         data = payload.get("data", None)
         raw_count = int(payload.get("raw_count", 0) or 0)
+        
         if isinstance(data, list):
             _NEWS_CACHE["ts"] = ts
             _NEWS_CACHE["data"] = data
             _NEWS_CACHE["raw_count"] = raw_count
-    except Exception:
-        # Cache should never break the API.
+    except Exception as e:
+        print(f"Cache load generic error: {e}")
         return
 
 def _save_news_cache_to_disk(ts: float, data: list, raw_count: int) -> None:
@@ -448,13 +460,21 @@ def _save_news_cache_to_disk(ts: float, data: list, raw_count: int) -> None:
             "data": data,
             "raw_count": raw_count
         })
+        
+        redis_success = False
         if redis_client:
             try:
                 redis_client.set("news_cache", payload)
+                redis_success = True
             except Exception as e:
                 print(f"Redis save error for news: {e}")
-        _CACHE_PATH.write_text(payload, encoding="utf-8")
-    except Exception:
+        
+        # Only write to local disk if Redis isn't available OR if it failed to save.
+        # This keeps the local file as a true emergency fallback and reduces file IO.
+        if not redis_success:
+            _CACHE_PATH.write_text(payload, encoding="utf-8")
+    except Exception as e:
+        print(f"Failed to save cache: {e}")
         return
 
 def _get_cached_news_entry() -> dict:
@@ -532,8 +552,6 @@ def _refresh_news_data() -> list:
         
         return current_data if current_data is not None else []
 
-# Removed background cache updater as it's now triggered by endpoints.
-
 _load_news_cache_from_disk()
 
 def fetch_x_twitter_reports():
@@ -556,9 +574,9 @@ def get_news(background_tasks: BackgroundTasks):
     cached_data = entry["data"]
     ts = entry["ts"]
     
-    # Trigger background refresh if stale or empty
+    # Trigger background refresh if stale or empty AND not already refreshing
     now = time.time()
-    if cached_data is None or (now - ts) > _CACHE_TTL_SECONDS:
+    if (cached_data is None or (now - ts) > _CACHE_TTL_SECONDS) and not _FETCH_LOCK.locked():
         print(f"Triggering background refresh. Cache age: {int(now - ts)}s")
         background_tasks.add_task(_refresh_news_data)
 
