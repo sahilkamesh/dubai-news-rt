@@ -48,6 +48,10 @@ function App() {
     const saved = localStorage.getItem('dubai_news_cache');
     return saved ? JSON.parse(saved) : [];
   });
+  const [lastUpdated, setLastUpdated] = useState(() => {
+    const saved = localStorage.getItem('dubai_news_last_updated');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [areas, setAreas] = useState(() => {
     const saved = localStorage.getItem('dubai_areas_cache');
     return saved ? JSON.parse(saved) : [];
@@ -78,9 +82,11 @@ function App() {
         return res.json();
       })
       .then(data => {
-        if (data && data.length > 0) {
-          setNews(data);
-          localStorage.setItem('dubai_news_cache', JSON.stringify(data));
+        if (data && data.news) {
+          setNews(data.news);
+          setLastUpdated(data.last_updated);
+          localStorage.setItem('dubai_news_cache', JSON.stringify(data.news));
+          localStorage.setItem('dubai_news_last_updated', JSON.stringify(data.last_updated));
         }
       })
       .catch(err => console.error('Error fetching news:', err));
@@ -138,16 +144,26 @@ function App() {
   return (
     <div className="App">
       <h1>UAE Safety News Feed</h1>
+      {lastUpdated && (
+        <div className="last-updated">
+          <span className="last-updated-dot"></span>
+          Last updated: {new Date(lastUpdated * 1000).toLocaleString('en-AE', { 
+            timeZone: 'Asia/Dubai',
+            dateStyle: 'medium',
+            timeStyle: 'short'
+          })}
+        </div>
+      )}
       <div className="legend">
         <div className="filter-controls">
           <span className="filter-label">Filter Severity:</span>
-          <button 
+          <button
             className={`toggle-button ${showLow ? 'active low' : ''}`}
             onClick={() => setShowLow(!showLow)}
           >
             Low (0-5)
           </button>
-          <button 
+          <button
             className={`toggle-button ${showHigh ? 'active high' : ''}`}
             onClick={() => setShowHigh(!showHigh)}
           >
@@ -210,12 +226,12 @@ function App() {
                     Severity: {sev}/10<br />
                     {area.lastUpdated && (
                       <>
-                        Last update: {new Date(area.lastUpdated).toLocaleString('en-AE', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Dubai' })}<br />
+                        Last update: {new Date(area.lastUpdated).toLocaleTimeString('en-AE', { timeZone: 'Asia/Dubai' })}<br />
                       </>
                     )}
                     {area.activeAlerts && area.activeAlerts.length > 0 && (
                       <span>
-                        Alerts: {(function() {
+                        Alerts: {(function () {
                           const text = area.activeAlerts.join(', ');
                           return text.length > 180 ? text.substring(0, 180) + '...' : text;
                         })()}

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Union, Any
 from pydantic import BaseModel
@@ -308,7 +308,10 @@ app.add_middleware(
 )
 
 @app.get("/health")
-def health_check(background_tasks: BackgroundTasks):
+def health_check(response: Response, background_tasks: BackgroundTasks):
+    # Allow any origin for the health check endpoint
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    
     # Trigger a refresh if stale, leveraging the 10-minute pings from GitHub Actions
     now = time.time()
     ts = float(_NEWS_CACHE.get("ts", 0.0) or 0.0)
@@ -330,6 +333,10 @@ class NewsItem(BaseModel):
     timestamp: str = ""
     coordinates: Any = None
     link: str = ""
+
+class NewsResponse(BaseModel):
+    news: List[NewsItem]
+    last_updated: float
 
 class AreaStatus(BaseModel):
     area: str
@@ -401,7 +408,7 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
                 activeAlerts=alerts,
             )
         )
-    print(areas)
+    print("Areas": areas)
     return areas
 
 _CACHE_TTL_SECONDS = 15 * 60  # 15 minutes
@@ -568,7 +575,7 @@ def fetch_uae_gov_alerts():
     """
     return []
 
-@app.get("/news", response_model=List[NewsItem])
+@app.get("/news", response_model=NewsResponse)
 def get_news(background_tasks: BackgroundTasks):
     entry = _get_cached_news_entry()
     cached_data = entry["data"]
@@ -585,14 +592,18 @@ def get_news(background_tasks: BackgroundTasks):
     if cached_data is not None:
         # Sort by timestamp descending so newest is always first
         sorted_news = sorted(cached_data, key=lambda x: x.get("timestamp", ""), reverse=True)
-        return [NewsItem(**comment) for comment in sorted_news]
+        return NewsResponse(
+            news=[NewsItem(**comment) for comment in sorted_news],
+            last_updated=ts
+        )
 
-    return []
+    return NewsResponse(news=[], last_updated=0.0)
 
 @app.get("/areas", response_model=List[AreaStatus])
 def get_areas(background_tasks: BackgroundTasks):
     # Same stale-while-revalidate logic for areas
-    news = get_news(background_tasks)
+    news_resp = get_news(background_tasks)
+    news = news_resp.news
     now_ts = time.time()
     recent_items = []
     
