@@ -295,6 +295,11 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict], current_aggregate
             existing_map = {item.get("id"): item for item in (current_aggregates or []) if item.get("id")}
 
             for i, item in enumerate(raw_outputs):
+                # Defensive check: ensure nulls don't break Pydantic validation
+                for field in ["link", "location", "summary", "incident", "timestamp", "source"]:
+                    if item.get(field) is None:
+                        item[field] = ""
+                
                 oid = item.get("id")
                 
                 # If it's a new item or an update to an existing one
@@ -379,7 +384,7 @@ class NewsItem(BaseModel):
     severity: int = 1
     timestamp: str = ""
     coordinates: Any = None
-    link: str = ""
+    link: Optional[str] = ""
 
 class NewsResponse(BaseModel):
     news: List[NewsItem]
