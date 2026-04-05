@@ -44,16 +44,25 @@ GEMINI_MODELS = [
 def get_recent_megathread_links(subreddit="dubai", thread_title="Attacks Megathread", count=3):
     headers = {"User-Agent": "Mozilla/5.0 (compatible; uae-news-app/0.1)"}
     url = f"https://www.reddit.com/r/{subreddit}/new.json?limit=90"
-    resp = requests.get(url, headers=headers)
-    posts = resp.json().get("data", {}).get("children", [])
-    links = []
-    for post in posts:
-        data = post.get("data", {})
-        if thread_title.lower() in data.get("title", "").lower():
-            links.append(f"https://www.reddit.com{data.get('permalink')}.json")
-        if len(links) >= count:
-            break
-    return links
+    try:
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            print(f"Reddit API error: {resp.status_code}")
+            return []
+            
+        data = resp.json()
+        posts = data.get("data", {}).get("children", [])
+        links = []
+        for post in posts:
+            data_inner = post.get("data", {})
+            if thread_title.lower() in data_inner.get("title", "").lower():
+                links.append(f"https://www.reddit.com{data_inner.get('permalink')}.json")
+            if len(links) >= count:
+                break
+        return links
+    except Exception as e:
+        print(f"Error fetching megathread links: {e}")
+        return []
 
 def _extract_comments_recursive(children: list, cutoff: float, seen_ids: set, parent_id: Optional[str] = None) -> List[dict]:
     """Helper to traverse nested Reddit comments (replies)."""
@@ -190,13 +199,31 @@ This function sends the relevant comments to Gemini, asks for summary clusters,
 and returns a list of dicts representing the aggregated reports.
 Requires GEMINI_API_KEY to be set in the environment.
 """
-def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> Optional[List[dict]]:
-    """Aggregates Reddit comments with Gemini, considering upvotes and replies."""
+def aggregate_reddit_comments_gemini(raw_comments: List[dict], current_aggregates: List[dict] = None) -> Optional[List[dict]]:
+    """
+    Aggregates Reddit comments with Gemini.
+    Takes new raw comments AND existing aggregated news items to manage incremental updates.
+    Returns the FULL list of updated aggregated news items.
+    """
     if not raw_comments:
-        return []
+        return current_aggregates or []
 
-    # Sort chronologically (oldest first) so Gemini naturally sees the earliest
-    # report for each group first, making "first report" identification reliable.
+    # Prepare existing aggregates for prompt
+    existing_data_str = "[]"
+    if current_aggregates:
+        # Only pass relevant fields to keep prompt concise
+        concise_existing = []
+        for item in current_aggregates:
+            concise_existing.append({
+                "id": item.get("id"),
+                "location": item.get("location"),
+                "incident": item.get("incident"),
+                "timestamp": item.get("timestamp"),
+                "summary": item.get("summary", "")
+            })
+        existing_data_str = json.dumps(concise_existing, indent=2)
+
+    # Sort new comments chronologically
     sorted_comments = sorted(raw_comments, key=lambda c: c.get("timestamp", ""))
     input_data_str: str = ""
     for c in sorted_comments:
@@ -207,48 +234,41 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> Optional[List[
             input_data_str += f"\n---\nID: {c.get('id')}{parent_info}, Timestamp: {c.get('timestamp')}{score_info}, link: {c.get('link')}, body: {txt.strip()[:150]}"
 
     if not input_data_str:
-        return []
+        return current_aggregates or []
 
     prompt = f"""
-        You are a safety incident aggregator for incidents in UAE. Analyze and aggregate user reports
-        regarding safety incidents (explosions, interceptions, sirens, drones, etc.) in UAE. 
+        You are a safety incident aggregator for incidents in UAE. Your task is to update a list of 
+        incident reports based on NEW data while maintaining existing verified incidents.
 
-        CRITICAL REQUIREMENT: ONLY return incidents that are CORROBORATED by multiple people or high engagement. 
-        A report is considered corroborated if:
-        1. Multiple independent users (different IDs) report the same or similar incident at the same time and in the same or nearby area.
-        2. A report has a high upvote score (e.g. 4+), indicating community validation.
-        3. A report has multiple replies that confirm or discuss the same incident.
+        ### CURRENT AGGREGATED INCIDENTS (CONTEXT):
+        {existing_data_str}
 
-        STRICTLY IGNORE:
-        - Single, isolated reports from one person with no upvotes or replies.
-        - Purely off-topic chatter, jokes, or irrelevant questions.
-        - General safety discussions that do not report a specific new incident.
-        
-        Group related reports only if they -
-        1. Report similar incidents
-        2. Reported at similar times
-        3. Reported in the same or nearby areas.
+        ### NEW RAW USER REPORTS:
+        {input_data_str}
+
+        ### INSTRUCTIONS:
+        1. REVIEW: Look at the NEW reports and see if they describe new incidents OR add detail/corroboration to EXISTING incidents.
+        2. MERGE/UPDATE: If a new report describes an incident already in the 'CURRENT' list:
+           - Update the existing incident's summary with any new details.
+           - Update the 'link' if a new report provides a more informative description.
+           - DO NOT change the 'id', 'location', or 'timestamp' (keep the earliest timestamp).
+        3. ADD NEW: If new reports (at least 2 independent reports OR 1 report with high score/replies) describe a NEW incident:
+           - Cluster them into a new incident entry with a location, representative coordinates, a safety severity score (1-10), the earliest reported timestamp, and the most informative source link.
+        4. CORROBORATION RULE: ONLY create or update incidents if they are corroborated by multiple people OR high engagement (4+ score or many replies).
+        5. NEVER DELETE: The final list MUST include ALL incidents from the 'CURRENT' list, either updated or unchanged. NEVER remove an incident.
+        6. IGNORE: Single, isolated reports with no corroboration or relevance.
 
         Context for Corroboration:
-        - The 'Data' below includes ID and Parent ID to show conversation hierarchy.
         - A reply (child ID with a Parent ID) often corroborates or adds detail to the parent report.
         - Multiple independent IDs reporting similar symptoms in the same location are the strongest evidence.
 
-        Return a list of aggregated validated reports, each with a summary,
-        safety concern severity score from 1-10, location, and earliest reported timestamp.
-
-        For the timestamp, use the earliest timestamp among the comments in the group.
-        For the link, use the EXACT 'link' of the comment that provides the most informative or detailed description of the incident.
-
-        Format the output as a JSON list like:
+        Return a FULL updated JSON list of aggregated reports. Each record MUST have:
         [
-        {{"location": "DIFC", "coordinates": [25.0805, 55.1411], "incident": "Interception heard",
-          "summary": "Multiple users reporting...", "severity": 5, "timestamp" : <earliest relevant timestamp str>,
-          "link" : <link to most relevant comment>}},
+        {{"id": "preserve_existing_or_leave_empty_for_new", 
+          "location": "DIFC", "coordinates": [25.0805, 55.1411], "incident": "Interception heard",
+          "summary": "Multiple users reporting...", "severity": 5, "timestamp" : "earliest timestamp",
+          "link" : "most relevant link"}},
         ]
-
-        Data:
-        {input_data_str}
     """
 
     errors = []
@@ -266,13 +286,40 @@ def aggregate_reddit_comments_gemini(raw_comments: List[dict]) -> Optional[List[
             print("Gemini response:", response.text)
             raw_outputs = json.loads(response.text)
             
-            # Ensure ID and source for frontend
+            # Post-process: Ensure ID and source for frontend
+            results = []
+            seen_ids = set()
+            
+            # Map existing aggregates for easy lookup by ID if LLM didn't return them for some reason
+            # (Though instructions say to return ALL)
+            existing_map = {item.get("id"): item for item in (current_aggregates or []) if item.get("id")}
+
             for i, item in enumerate(raw_outputs):
-                if not item.get("id"):
-                    item["id"] = f"agg_{int(time.time())}_{i}"
-                if not item.get("source"):
-                    item["source"] = "Reddit Aggregation"
-            return raw_outputs
+                oid = item.get("id")
+                
+                # If it's a new item or an update to an existing one
+                if not oid or oid.startswith("agg_") is False or oid not in existing_map:
+                    # It's a new item (or LLM generated a new ID)
+                    if not oid or oid not in seen_ids:
+                        item["id"] = oid or f"agg_{int(time.time())}_{i}"
+                        item["source"] = item.get("source") or "Reddit Aggregation"
+                        results.append(item)
+                        seen_ids.add(item["id"])
+                else:
+                    # It's an update to an existing item
+                    # Merge with existing to ensure any fields NOT handled by LLM are preserved
+                    existing_item = existing_map[oid]
+                    updated_item = {**existing_item, **item}
+                    results.append(updated_item)
+                    seen_ids.add(oid)
+
+            # Safety check: if LLM ignored Rule 5 (Never Delete), forcefully add back missing ones
+            for eid, eitem in existing_map.items():
+                if eid not in seen_ids:
+                    print(f"Warning: LLM omitted existing incident {eid}. Restoring.")
+                    results.append(eitem)
+
+            return results
         except Exception as e:
             print(f"Gemini aggregation error with {model_name}: {e}")
             errors.append(f"{model_name}: {str(e)}")
@@ -408,13 +455,13 @@ def _build_area_status_from_news(news_items: List[dict]) -> List[AreaStatus]:
                 activeAlerts=alerts,
             )
         )
-    print("Areas": areas)
+    print("Areas:", areas)
     return areas
 
 _CACHE_TTL_SECONDS = 15 * 60  # 15 minutes
 _CACHE_VERSION = 5
 _CACHE_PATH = Path(__file__).resolve().parent / "cache_news.json"
-_NEWS_CACHE: dict = {"ts": 0.0, "data": None, "raw_count": 0}
+_NEWS_CACHE: dict = {"ts": 0.0, "data": None, "raw_count": 0, "last_comment_ts": 0.0}
 _CACHE_LOCK = threading.Lock() # Protects access to _NEWS_CACHE
 _FETCH_LOCK = threading.Lock() # Ensures only one refresh happens at a time
 
@@ -450,11 +497,13 @@ def _load_news_cache_from_disk() -> None:
         ts = float(payload.get("ts", 0.0) or 0.0)
         data = payload.get("data", None)
         raw_count = int(payload.get("raw_count", 0) or 0)
+        last_comment_ts = float(payload.get("last_comment_ts", 0.0) or 0.0)
         
         if isinstance(data, list):
             _NEWS_CACHE["ts"] = ts
             _NEWS_CACHE["data"] = data
             _NEWS_CACHE["raw_count"] = raw_count
+            _NEWS_CACHE["last_comment_ts"] = last_comment_ts
     except Exception as e:
         print(f"Cache load generic error: {e}")
         return
@@ -465,7 +514,8 @@ def _save_news_cache_to_disk(ts: float, data: list, raw_count: int) -> None:
             "version": _CACHE_VERSION, 
             "ts": ts, 
             "data": data,
-            "raw_count": raw_count
+            "raw_count": raw_count,
+            "last_comment_ts": _NEWS_CACHE.get("last_comment_ts", 0.0)
         })
         
         redis_success = False
@@ -489,7 +539,8 @@ def _get_cached_news_entry() -> dict:
         return {
             "ts": _NEWS_CACHE.get("ts", 0.0),
             "data": _NEWS_CACHE.get("data"),
-            "raw_count": _NEWS_CACHE.get("raw_count", 0)
+            "raw_count": _NEWS_CACHE.get("raw_count", 0),
+            "last_comment_ts": _NEWS_CACHE.get("last_comment_ts", 0.0)
         }
 
 def _get_cached_news() -> Optional[list]:
@@ -507,6 +558,7 @@ def _set_cached_news(data: list, raw_count: int, ts: Optional[float] = None) -> 
         _NEWS_CACHE["ts"] = ts
         _NEWS_CACHE["data"] = data
         _NEWS_CACHE["raw_count"] = raw_count
+        # last_comment_ts is updated separately during refresh
     _save_news_cache_to_disk(ts, data, raw_count)
 
 def _refresh_news_data() -> list:
@@ -535,6 +587,19 @@ def _refresh_news_data() -> list:
             raw_comments = collect_reddit_raw_comments(megathread_links[0], cutoff=cutoff, max_threads=16)
             new_count = len(raw_comments)
             
+            # Update the latest comment timestamp seen
+            if new_count > 0:
+                try:
+                    # Find the newest timestamp string among raw comments
+                    latest_raw_ts_str = max(c.get("timestamp", "") for c in raw_comments)
+                    if latest_raw_ts_str:
+                        latest_raw_ts = datetime.datetime.fromisoformat(latest_raw_ts_str).timestamp()
+                        with _CACHE_LOCK:
+                            if latest_raw_ts > _NEWS_CACHE["last_comment_ts"]:
+                                _NEWS_CACHE["last_comment_ts"] = latest_raw_ts
+                except Exception as e:
+                    print(f"Error updating last_comment_ts: {e}")
+
             print(f"Executing Gemini aggregation with {new_count} new comments (scheduled refresh)...")
             
             if new_count == 0:
@@ -542,19 +607,18 @@ def _refresh_news_data() -> list:
                 _set_cached_news(current_data, last_raw_count, ts=now)
                 return current_data if current_data is not None else []
 
-            aggregated_comments = aggregate_reddit_comments_gemini(raw_comments)
+            aggregated_results = aggregate_reddit_comments_gemini(raw_comments, current_data)
             
-            if aggregated_comments is not None:
-                print(f"Gemini refresh successful. Data updated with {new_count} raw comments seen.")
-                # Append new aggregations to existing data
-                existing_data = current_data if current_data is not None else []
-                new_data = existing_data + aggregated_comments
+            if aggregated_results is not None:
+                print(f"Gemini refresh successful. Data updated with {new_count} raw comments processed.")
+                # We now replacement with the full updated list from Gemini
+                new_data = aggregated_results
                 
                 # Update both in-memory and persistence layers (Redis/Disk)
                 _set_cached_news(new_data, last_raw_count + new_count, ts=now)
                 return new_data
             else:
-                print("Gemini failed to provide a valid response for all models. Retaining stale data and NOT advancing the cutoff.")
+                print("Gemini failed to provide a valid response for all models. Retaining stale data.")
                 return current_data if current_data is not None else []
         
         return current_data if current_data is not None else []
@@ -579,22 +643,34 @@ def fetch_uae_gov_alerts():
 def get_news(background_tasks: BackgroundTasks):
     entry = _get_cached_news_entry()
     cached_data = entry["data"]
-    ts = entry["ts"]
+    fetch_ts = entry["ts"]
     
     # Trigger background refresh if stale or empty AND not already refreshing
     now = time.time()
-    if (cached_data is None or (now - ts) > _CACHE_TTL_SECONDS) and not _FETCH_LOCK.locked():
-        print(f"Triggering background refresh. Cache age: {int(now - ts)}s")
+    if (cached_data is None or (now - fetch_ts) > _CACHE_TTL_SECONDS) and not _FETCH_LOCK.locked():
+        print(f"Triggering background refresh. Cache age: {int(now - fetch_ts)}s")
         background_tasks.add_task(_refresh_news_data)
 
     # ALWAYS return whatever we have in the cache, even if stale.
-    # This prevents the UI from showing an empty list while refreshes happen.
     if cached_data is not None:
         # Sort by timestamp descending so newest is always first
         sorted_news = sorted(cached_data, key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        # Priority: Return the timestamp of the latest parsed comment if we have it
+        display_ts = entry.get("last_comment_ts") or fetch_ts
+        
+        # If no comments have ever been parsed, fall back to newest report
+        if display_ts == 0.0 and sorted_news:
+            try:
+                latest_ts_str = sorted_news[0].get("timestamp", "")
+                if latest_ts_str:
+                    display_ts = datetime.datetime.fromisoformat(latest_ts_str).timestamp()
+            except Exception:
+                pass
+
         return NewsResponse(
             news=[NewsItem(**comment) for comment in sorted_news],
-            last_updated=ts
+            last_updated=display_ts
         )
 
     return NewsResponse(news=[], last_updated=0.0)
